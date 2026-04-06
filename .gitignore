@@ -1,0 +1,17 @@
+dist/
+node_modules/
+.vite/
+*.log
+src-tauri/target/
+src-tauri/gen/
+.DS_Store
+Thumbs.db
+
+# Release builds
+Releases/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo

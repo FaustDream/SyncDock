@@ -1,0 +1,28 @@
+[package]
+name = "syncdock-desktop"
+version = "1.0.0"
+description = "SyncDock desktop application"
+authors = ["OpenAI"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.77"
+
+[build-dependencies]
+tauri-build = { version = "1.5", features = [] }
+
+[dependencies]
+chrono = { version = "0.4.42", features = ["serde"] }
+dunce = "1.0.5"
+open = "5.3.2"
+rayon = "1.10.0"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+tauri = { version = "1.8.3", features = ["dialog-all", "path-all"] }
+uuid = { version = "1.18.1", features = ["serde", "v4"] }
+wait-timeout = "0.2.1"
+walkdir = "2.5.0"
+which = "8.0.0"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
