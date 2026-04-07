@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use crate::{
     errors::{AppError, AppResult},
-    git::{detect_git_environment, inspect_repository, scan_repositories as scan_local_repositories},
+    git::{detect_git_environment, inspect_repository, scan_repositories as scan_local_repositories, clone_repository},
     models::{
         AppSettings, AppSnapshot, CloneRepositoryRequest, ConfigExportResult,
         ConfigImportPreview, ConfigImportRequest, ConfigImportResult, LogCleanupResult,
@@ -31,7 +31,6 @@ fn get_app_snapshot(app: AppHandle) -> AppResult<AppSnapshot> {
     let mut tasks = storage::load_tasks(&app).map_err(map_task_history_load_error)?;
     storage::sort_repositories(&mut repositories);
     storage::sort_tasks(&mut tasks);
-
 
     Ok(AppSnapshot {
         git_environment: detect_git_environment(),
@@ -83,7 +82,6 @@ fn set_config_directory(app: AppHandle, directory: Option<String>) -> AppResult<
 
 #[tauri::command]
 fn get_logs_diagnostics(app: AppHandle) -> AppResult<LogsDiagnostics> {
-
     storage::get_logs_diagnostics(&app)
 }
 
@@ -101,7 +99,6 @@ fn get_task_log(app: AppHandle, task_id: String) -> AppResult<String> {
 fn get_repository_log(app: AppHandle, repo_id: String) -> AppResult<String> {
     storage::read_repository_log(&app, &repo_id).map_err(map_log_view_load_error)
 }
-
 
 #[tauri::command]
 fn export_task_log(app: AppHandle, task_id: String, destination: String) -> AppResult<String> {
@@ -229,7 +226,6 @@ fn update_repository(app: AppHandle, input: RepositoryUpdateInput) -> AppResult<
     Ok(updated)
 }
 
-
 #[tauri::command]
 fn remove_repository(app: AppHandle, repo_id: String) -> AppResult<()> {
     let mut repositories = storage::load_repositories(&app)?;
@@ -280,13 +276,22 @@ fn sync_repositories_command(
 }
 
 #[tauri::command]
+fn force_sync_repositories_command(
+    app: AppHandle,
+    runtime: State<SyncRuntimeState>,
+    repo_ids: Option<Vec<String>>,
+    group: Option<String>,
+) -> AppResult<SyncTaskRecord> {
+    sync::force_sync_repositories(&app, runtime.inner(), repo_ids, group)
+}
+
+#[tauri::command]
 fn cancel_sync_task_command(app: AppHandle, runtime: State<SyncRuntimeState>) -> AppResult<Option<String>> {
     sync::cancel_sync_task(&app, runtime.inner())
 }
 
 #[tauri::command]
 fn open_external(target: String) -> AppResult<()> {
-
     open::that_detached(target).map_err(|error| {
         AppError::new(
             "SD-UI-001",
@@ -305,7 +310,7 @@ fn clone_repository_command(
 ) -> AppResult<RepositoryRecord> {
     let settings = storage::load_settings(&app)?;
     let mut existing = storage::load_repositories(&app)?;
-    let path = git::clone_repository(&request, &settings)?;
+    let path = clone_repository(&request, &settings)?;
     let record = create_repository_record(
         &settings,
         &existing,
@@ -395,7 +400,6 @@ fn map_log_view_load_error(error: AppError) -> AppError {
 }
 
 fn main() {
-
     tauri::Builder::default()
         .manage(SyncRuntimeState::default())
         .setup(|app| {
@@ -410,7 +414,6 @@ fn main() {
             save_settings,
             set_config_directory,
             get_logs_diagnostics,
-
             cleanup_logs,
             get_task_log,
             get_repository_log,
@@ -426,11 +429,11 @@ fn main() {
             remove_repository,
             refresh_repositories,
             sync_repositories_command,
+            force_sync_repositories_command,
             cancel_sync_task_command,
             open_external,
             clone_repository_command
         ])
-
         .run(tauri::generate_context!())
         .expect("error while running SyncDock");
 }

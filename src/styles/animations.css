@@ -1,0 +1,220 @@
+/* Loading Panel */
+.loading-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  min-height: 360px;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.fullscreen-loading-panel {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 32px;
+  background: linear-gradient(180deg, var(--bg) 0%, var(--bg-elevated, var(--bg)) 100%);
+  z-index: 1000;
+  animation: fadeIn 0.5s ease-out;
+}
+
+.fullscreen-loading-panel::before {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 120px;
+  background: linear-gradient(180deg, transparent 0%, var(--primary) 100%);
+  opacity: 0.08;
+  animation: waveFlow 4s ease-in-out infinite;
+}
+
+.fullscreen-loading-panel .cat-boat-svg {
+  width: 160px;
+  height: 160px;
+  animation: catBoatFloat 3s ease-in-out infinite, fadeInScale 0.8s ease-out;
+  filter: drop-shadow(0 8px 24px rgba(0, 0, 0, 0.15));
+  position: relative;
+  z-index: 1;
+}
+
+.fullscreen-loading-panel .loading-title {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.5px;
+  animation: fadeIn 1s ease-out 0.2s both;
+}
+
+.fullscreen-loading-panel .fade-in-text {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  animation: pulse 2.5s ease-in-out infinite, fadeIn 1.2s ease-out 0.4s both;
+}
+
+.fullscreen-loading-panel .loading-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation: fadeIn 1.4s ease-out 0.6s both;
+}
+
+.fullscreen-loading-panel .loading-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.fullscreen-loading-panel .loading-dots span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--primary);
+  animation: dotPulse 1.4s ease-in-out infinite;
+}
+
+.fullscreen-loading-panel .loading-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.fullscreen-loading-panel .loading-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fadeInScale {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes catBoatFloat {
+  0%, 100% {
+    transform: translateY(0) rotate(-1deg);
+  }
+  25% {
+    transform: translateY(-12px) rotate(1deg);
+  }
+  50% {
+    transform: translateY(-6px) rotate(-0.5deg);
+  }
+  75% {
+    transform: translateY(-15px) rotate(0.5deg);
+  }
+}
+
+@keyframes waveFlow {
+  0%, 100% {
+    transform: translateY(0);
+    opacity: 0.08;
+  }
+  50% {
+    transform: translateY(-8px);
+    opacity: 0.12;
+  }
+}
+
+@keyframes dotPulse {
+  0%, 100% {
+    opacity: 0.3;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.loading-panel .loading-icon {
+  width: 120px;
+  height: 120px;
+  animation: float 3s ease-in-out infinite;
+}
+
+.loading-panel .loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.loading-panel .loading-text {
+  font-size: 14px;
+  color: var(--text-soft);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Task item animation */
+.task-item-enter {
+  animation: slideIn 0.3s ease-out forwards;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Sync progress animation */
+.sync-progress-item {
+  transition: all 0.3s ease;
+}
+
+.sync-progress-item.running {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.sync-progress-item.running .repo-name {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.inline-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-right: 8px;
+  vertical-align: middle;
+}

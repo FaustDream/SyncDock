@@ -1,0 +1,494 @@
+/* Metric Grid */
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.metric-button {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+  min-width: 0;
+  padding: 14px 12px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-primary);
+}
+
+.metric-button.active {
+  box-shadow: var(--metric-active-shadow);
+}
+
+.metric-button.success.active {
+  border-color: var(--metric-success-border);
+}
+
+.metric-button.pending.active,
+.metric-button.neutral.active {
+  border-color: var(--metric-primary-border);
+}
+
+.metric-button.warning.active {
+  border-color: var(--metric-warning-border);
+}
+
+.metric-button.danger.active {
+  border-color: var(--metric-danger-border);
+}
+
+.metric-label {
+  color: var(--text-secondary);
+  font-size: 0.86rem;
+  line-height: 1.25;
+}
+
+.metric-value {
+  font-size: 1.5rem;
+}
+
+/* Stat Card */
+.stat-card {
+  padding: 22px;
+}
+
+.stat-card h3 {
+  margin: 8px 0;
+  font-size: 2rem;
+}
+
+/* Repository List */
+.repo-list,
+.stack-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.compact-list {
+  gap: 10px;
+}
+
+.repo-item,
+.task-item,
+.list-item {
+  width: 100%;
+  border-radius: 16px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+
+.repo-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 16px;
+}
+
+.repo-item.active {
+  border-color: var(--metric-primary-border);
+  box-shadow: var(--metric-active-shadow);
+}
+
+.compact-row {
+  align-items: flex-start;
+}
+
+.overview-title-row {
+  justify-content: space-between;
+  width: 100%;
+}
+
+.repo-side {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+
+.repo-item .muted {
+  margin: 6px 0 0;
+  word-break: break-all;
+}
+
+.repo-path-text {
+  font-size: 0.8rem;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.repo-main {
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.repo-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.repo-title-row h4 {
+  margin: 0 0 4px;
+}
+
+.repo-meta-row {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--meta-text);
+  font-size: 0.85rem;
+}
+
+.repo-list .badge,
+.repo-table .badge {
+  padding: 6px 10px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.repo-actions,
+.inline-actions,
+.modal-footer,
+.summary-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.wrap {
+  flex-wrap: wrap;
+}
+
+/* Repository Table */
+.repo-table {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: auto;
+}
+
+.repo-table-row {
+  display: grid;
+  grid-template-columns: minmax(260px, 2fr) minmax(88px, 0.72fr) minmax(108px, 0.9fr) minmax(104px, 0.84fr) minmax(180px, 1.25fr) minmax(88px, 0.72fr);
+  gap: 10px;
+  align-items: center;
+  min-width: 960px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.repo-table-row:first-child {
+  border-top: none;
+}
+
+.repo-table-head {
+  background: var(--bg-muted);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.repo-table-name-cell {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.repo-table-primary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.repo-table-primary .text-link-button {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repo-table-secondary {
+  font-size: 0.8rem;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.repo-cell-ellipsis {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repo-cell-mono {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.repo-list-filters {
+  grid-template-columns: minmax(240px, 2fr) repeat(4, minmax(110px, 0.9fr));
+  gap: 12px;
+}
+
+.repo-list-filters .ghost-button,
+.repo-list-filters .primary-button {
+  min-width: 0;
+  padding: 9px 12px;
+  font-size: 0.88rem;
+}
+
+/* Scan Result Item */
+.scan-result-item {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.scan-result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.scan-result-form {
+  gap: 12px;
+}
+
+/* Task Item */
+.task-item,
+.list-item.selectable,
+.checkbox-item {
+  padding: 15px 16px;
+  text-align: left;
+}
+
+.task-item.active {
+  outline: 2px solid var(--active-outline);
+}
+
+.task-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.task-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) repeat(2, minmax(0, 0.8fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.compact-search {
+  min-width: 0;
+}
+
+.task-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.task-item.interactive {
+  cursor: pointer;
+}
+
+.task-item-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.task-item-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.task-item-head,
+.task-result-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.task-item-head strong,
+.task-result-head strong {
+  word-break: break-word;
+}
+
+.task-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
+  color: var(--meta-text);
+  font-size: 0.9rem;
+}
+
+.task-code-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.task-result-item {
+  padding: 14px 16px;
+}
+
+.task-result-extra {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: var(--task-extra-bg);
+  color: var(--task-extra-text);
+}
+
+.task-result-extra p {
+  margin: 0;
+}
+
+.task-result-extra p + p {
+  margin-top: 6px;
+}
+
+.task-log-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 180px;
+  gap: 12px;
+  margin: 12px 0;
+}
+
+/* Log Panel */
+.log-panel {
+  max-height: 420px;
+  overflow: auto;
+  padding: 16px;
+  border-radius: 20px;
+  background: var(--log-bg);
+  color: var(--log-text);
+  font-size: 0.84rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.log-line-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 520px;
+  overflow: auto;
+}
+
+.repo-log-list {
+  max-height: 360px;
+}
+
+.log-line {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: var(--log-bg);
+  color: var(--log-text);
+}
+
+.log-line.warning {
+  background: var(--log-warning-bg);
+  color: var(--log-warning-text);
+}
+
+.log-line.error {
+  background: var(--log-error-bg);
+  color: var(--log-error-text);
+}
+
+.log-line-index {
+  min-width: 36px;
+  color: var(--log-index);
+  font-size: 0.82rem;
+}
+
+.log-line-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.log-line-text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: Consolas, "Cascadia Code", monospace;
+}
+
+/* Path Input */
+.path-input {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.path-replacement-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px;
+}
+
+/* Preview Item */
+.preview-item {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.preview-item p {
+  margin: 0;
+}
+
+.import-warning-item {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.import-warning-item p {
+  margin: 0;
+}
+
+.import-result-warning-block {
+  margin: 12px 0;
+}
+
+/* Settings Tab Content */
+.settings-tab-content {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}

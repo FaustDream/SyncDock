@@ -11,11 +11,13 @@ export type SyncItemState =
   | "failed"
   | "cancelled";
 
+export type RepoTone = "neutral" | "success" | "pending" | "warning" | "danger";
 
 export type PreferredView = "overview" | "repositories" | "tasks" | "settings";
 export type ThemeMode = "system" | "light" | "dark";
 export type LanguageMode = "zh-CN" | "en-US";
 export type ImportStrategy = "merge" | "overwrite" | "repositoriesOnly" | "settingsOnly";
+export type SyncMode = "safe" | "force" | "rebase";
 
 
 
@@ -110,6 +112,7 @@ export interface AppSettings {
   defaultView: PreferredView;
   themeMode: ThemeMode;
   languageMode: LanguageMode;
+  syncMode?: SyncMode;
 }
 
 

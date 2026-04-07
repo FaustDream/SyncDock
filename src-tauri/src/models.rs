@@ -47,6 +47,16 @@ pub enum ImportStrategy {
     SettingsOnly,
 }
 
+/// Sync mode for repository synchronization
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum SyncMode {
+    #[default]
+    Safe,
+    Force,
+    Rebase,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryStatus {
@@ -174,6 +184,8 @@ pub struct AppSettings {
     pub default_view: String,
     pub theme_mode: String,
     pub language_mode: String,
+    #[serde(default)]
+    pub sync_mode: SyncMode,
 }
 
 
@@ -200,9 +212,8 @@ impl Default for AppSettings {
             default_view: "overview".into(),
             theme_mode: "system".into(),
             language_mode: "zh-CN".into(),
+            sync_mode: SyncMode::default(),
         }
-
-
     }
 }
 
@@ -303,13 +314,18 @@ pub struct ConfigImportResult {
 }
 
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfigTransferBundle {
+    #[serde(default)]
     pub version: u32,
+    #[serde(default)]
     pub exported_at: String,
+    #[serde(default)]
     pub settings: AppSettings,
+    #[serde(default)]
     pub repositories: Vec<RepositoryRecord>,
+    #[serde(default)]
     pub tasks: Vec<SyncTaskRecord>,
 }
 

@@ -1,92 +1,23 @@
-use std::{
-    collections::HashMap,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
-    },
-    time::{Duration, Instant},
-};
+//! Normal sync operations (safe mode)
+
+use std::sync::{atomic::Ordering, Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use rayon::prelude::*;
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 
-use crate::{
-    errors::{AppError, AppResult},
-    git::{classify_git_failure, inspect_repository, run_git_with_cancel},
-    models::{
-        AppSettings, NoticeLevel, RepositoryRecord, RepositoryStatus, SyncItemState,
-        SyncProgressEvent, SyncTaskItemResult, SyncTaskRecord,
-    },
-    storage,
-};
+use crate::errors::{AppError, AppResult};
+use crate::git::{classify_git_failure, inspect_repository, run_git_with_cancel};
+use crate::models::{AppSettings, NoticeLevel, RepositoryRecord, RepositoryStatus, SyncItemState, SyncProgressEvent, SyncTaskItemResult, SyncTaskRecord};
+use crate::storage;
 
-struct ActiveTaskState {
-    task_id: String,
-    cancel_requested: Arc<AtomicBool>,
-    shared_task: Arc<Mutex<SyncTaskRecord>>,
-}
+use super::runtime::{ActiveTaskGuard, ActiveTaskState, SyncRuntimeState};
+use super::outcome::{build_cancelled_repo_outcome, build_repo_outcome, check_cancel_requested};
+use super::progress::{build_final_summary, build_progress_summary, emit_progress};
 
-pub struct SyncRuntimeState {
-    active_task: Mutex<Option<ActiveTaskState>>,
-}
-
-impl Default for SyncRuntimeState {
-    fn default() -> Self {
-        Self {
-            active_task: Mutex::new(None),
-        }
-    }
-}
-
-struct ActiveTaskGuard<'a> {
-    lock: &'a Mutex<Option<ActiveTaskState>>,
-}
-
-impl Drop for ActiveTaskGuard<'_> {
-    fn drop(&mut self) {
-        if let Ok(mut active) = self.lock.lock() {
-            *active = None;
-        }
-    }
-}
-
-pub fn cancel_sync_task(app: &AppHandle, runtime: &SyncRuntimeState) -> AppResult<Option<String>> {
-    let (task_id, shared_task) = {
-        let active = runtime.active_task.lock().map_err(|_| {
-            AppError::new(
-                "SD-TASK-003",
-                NoticeLevel::Error,
-                "任务状态异常",
-                "任务状态异常，请查看日志并重新启动应用。",
-            )
-        })?;
-
-        let Some(active_task) = active.as_ref() else {
-            return Ok(None);
-        };
-
-        active_task.cancel_requested.store(true, Ordering::SeqCst);
-        if let Ok(mut task) = active_task.shared_task.lock() {
-            if task.running {
-                task.cancel_requested = true;
-                task.summary_message = build_progress_summary(&task);
-            }
-        }
-
-        (active_task.task_id.clone(), Arc::clone(&active_task.shared_task))
-    };
-
-    let _ = storage::append_task_log(
-        app,
-        &task_id,
-        &format!("[{}] 已收到取消请求，正在停止当前同步任务。", Utc::now().to_rfc3339()),
-    );
-    emit_progress(app, &shared_task, None, None);
-    Ok(Some(task_id))
-}
-
+/// Synchronize repositories
 pub fn sync_repositories(
     app: &AppHandle,
     runtime: &SyncRuntimeState,
@@ -119,7 +50,7 @@ pub fn sync_repositories(
     let paths = storage::ensure_storage(app)?;
     let started_at = Utc::now().to_rfc3339();
     let ordered_repo_ids = target_list.iter().map(|repo| repo.id.clone()).collect::<Vec<_>>();
-    let cancel_requested = Arc::new(AtomicBool::new(false));
+    let cancel_requested = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let shared_task = Arc::new(Mutex::new(SyncTaskRecord {
         task_id: task_id.clone(),
         created_at: started_at.clone(),
@@ -200,11 +131,11 @@ pub fn sync_repositories(
         return Ok(final_task);
     }
 
-    let order_map = ordered_repo_ids
+    let order_map: std::collections::HashMap<String, usize> = ordered_repo_ids
         .iter()
         .enumerate()
         .map(|(index, repo_id)| (repo_id.clone(), index))
-        .collect::<HashMap<_, _>>();
+        .collect();
 
     let settings_for_pool = settings.clone();
     let shared_for_pool = Arc::clone(&shared_task);
@@ -236,7 +167,21 @@ pub fn sync_repositories(
                             cancel_for_pool.as_ref(),
                         )
                     };
-                    update_task_progress(&app_for_pool, &shared_for_pool, &outcome.0, &outcome.1);
+                    {
+                        if let Ok(mut task) = shared_for_pool.lock() {
+                            task.completed += 1;
+                            match outcome.1.state {
+                                SyncItemState::Success => task.success_count += 1,
+                                SyncItemState::Skipped => task.skipped_count += 1,
+                                SyncItemState::Failed => task.failed_count += 1,
+                                SyncItemState::Cancelled => task.cancelled_count += 1,
+                                _ => {}
+                            }
+                            task.items.push(outcome.1.clone());
+                            task.summary_message = build_progress_summary(&task);
+                        }
+                        emit_progress(&app_for_pool, &shared_for_pool, Some(outcome.0.id.clone()), Some(outcome.0.name.clone()));
+                    }
                     outcome
                 })
                 .collect::<Vec<_>>()
@@ -245,7 +190,7 @@ pub fn sync_repositories(
     let updated_map = outcomes
         .into_iter()
         .map(|(repo, _)| (repo.id.clone(), repo))
-        .collect::<HashMap<String, RepositoryRecord>>();
+        .collect::<std::collections::HashMap<String, RepositoryRecord>>();
     for repo in repositories.iter_mut() {
         if let Some(updated) = updated_map.get(&repo.id) {
             *repo = updated.clone();
@@ -262,103 +207,13 @@ pub fn sync_repositories(
     Ok(final_task)
 }
 
-fn emit_progress(
-    app: &AppHandle,
-    shared_task: &Arc<Mutex<SyncTaskRecord>>,
-    current_repo_id: Option<String>,
-    current_repo_name: Option<String>,
-) {
-    if let Ok(task) = shared_task.lock() {
-        let snapshot = task.clone();
-        drop(task);
-        let _ = app.emit_all(
-            "sync-progress",
-            SyncProgressEvent {
-                task: snapshot,
-                current_repo_id,
-                current_repo_name,
-            },
-        );
-    }
-}
-
-fn update_task_progress(
-    app: &AppHandle,
-    shared_task: &Arc<Mutex<SyncTaskRecord>>,
-    repo: &RepositoryRecord,
-    item: &SyncTaskItemResult,
-) {
-    if let Ok(mut task) = shared_task.lock() {
-        task.completed += 1;
-        match item.state {
-            SyncItemState::Success => task.success_count += 1,
-            SyncItemState::Skipped => task.skipped_count += 1,
-            SyncItemState::Failed => task.failed_count += 1,
-            SyncItemState::Cancelled => task.cancelled_count += 1,
-            _ => {}
-        }
-        task.items.push(item.clone());
-        task.summary_message = build_progress_summary(&task);
-        drop(task);
-        emit_progress(
-            app,
-            shared_task,
-            Some(repo.id.clone()),
-            Some(repo.name.clone()),
-        );
-    }
-}
-
-fn finalize_task(
-    app: &AppHandle,
-    shared_task: Arc<Mutex<SyncTaskRecord>>,
-    task_id: &str,
-) -> AppResult<SyncTaskRecord> {
-    let task = {
-        let mut task = shared_task
-            .lock()
-            .map_err(|_| AppError::internal("任务状态锁不可用"))?;
-        task.running = false;
-        task.end_time = Some(Utc::now().to_rfc3339());
-        task.cancelled = task.cancelled_count > 0;
-        task.cancel_requested = false;
-        task.summary_message = build_final_summary(&task);
-        task.clone()
-    };
-
-    let _ = storage::append_task_log(
-        app,
-        task_id,
-        &format!("[{}] {}", Utc::now().to_rfc3339(), task.summary_message),
-    );
-    let _ = app.emit_all(
-        "sync-progress",
-        SyncProgressEvent {
-            task: task.clone(),
-            current_repo_id: None,
-            current_repo_name: None,
-        },
-    );
-    Ok(task)
-}
-
-fn persist_task(app: &AppHandle, task: &SyncTaskRecord) -> AppResult<()> {
-    let mut tasks = storage::load_tasks(app)?;
-    tasks.retain(|item| item.task_id != task.task_id);
-    tasks.push(task.clone());
-    storage::sort_tasks(&mut tasks);
-    if tasks.len() > 60 {
-        tasks.truncate(60);
-    }
-    storage::save_tasks(app, &tasks)
-}
-
+/// Execute sync for a single repository
 fn execute_sync_for_repo(
     app: &AppHandle,
     repo: &RepositoryRecord,
     settings: &AppSettings,
     task_id: &str,
-    cancel_requested: &AtomicBool,
+    cancel_requested: &std::sync::atomic::AtomicBool,
 ) -> (RepositoryRecord, SyncTaskItemResult) {
     let started = Instant::now();
     let timeout = Duration::from_secs(settings.command_timeout_secs.clamp(10, 300));
@@ -379,7 +234,7 @@ fn execute_sync_for_repo(
         cancel_requested,
         format!("仓库 {} 在开始前被取消。", repo.name),
     ) {
-        log("同步任务已取消，跳过当前仓库。") ;
+        log("同步任务已取消，跳过当前仓库。");
         return build_repo_outcome(updated, error, started.elapsed().as_millis(), task_id);
     }
 
@@ -401,6 +256,7 @@ fn execute_sync_for_repo(
     updated.remote_url = inspection.remote_url.clone();
     updated.status = inspection.status.clone();
 
+    // Skip conditions
     if inspection.status.detached_head {
         return build_repo_outcome(
             updated,
@@ -476,11 +332,12 @@ fn execute_sync_for_repo(
         );
     }
 
+    // Fetch
     if let Err(error) = check_cancel_requested(
         cancel_requested,
         format!("仓库 {} 在 fetch 前被取消。", repo.name),
     ) {
-        log("同步任务已取消，停止当前仓库处理。") ;
+        log("同步任务已取消，停止当前仓库处理。");
         return build_repo_outcome(updated, error, started.elapsed().as_millis(), task_id);
     }
 
@@ -504,17 +361,18 @@ fn execute_sync_for_repo(
         }
         Err(error) => {
             if error.code == "SD-SYNC-006" {
-                log("同步任务已取消，已终止当前 Git 命令。") ;
+                log("同步任务已取消，已终止当前 Git 命令。");
             }
             return build_repo_outcome(updated, error, started.elapsed().as_millis(), task_id);
         }
     }
 
+    // Post-fetch inspection
     if let Err(error) = check_cancel_requested(
         cancel_requested,
         format!("仓库 {} 在 fetch 后被取消。", repo.name),
     ) {
-        log("同步任务已取消，停止后续检查。") ;
+        log("同步任务已取消，停止后续检查。");
         return build_repo_outcome(updated, error, started.elapsed().as_millis(), task_id);
     }
 
@@ -525,6 +383,7 @@ fn execute_sync_for_repo(
     updated.status = post_fetch.status.clone();
     updated.remote_url = post_fetch.remote_url.clone();
 
+    // Check for divergence
     if post_fetch.status.ahead_count > 0 && post_fetch.status.behind_count > 0 {
         return build_repo_outcome(
             updated,
@@ -540,6 +399,7 @@ fn execute_sync_for_repo(
         );
     }
 
+    // Already up to date
     if post_fetch.status.behind_count == 0 {
         updated.last_sync_at = Some(Utc::now().to_rfc3339());
         updated.last_sync_status = Some(SyncItemState::Success);
@@ -561,10 +421,7 @@ fn execute_sync_for_repo(
                 level: NoticeLevel::Info,
                 code: None,
                 title: "检查完成".into(),
-                detail: updated
-                    .last_sync_message
-                    .clone()
-                    .unwrap_or_else(|| "已是最新状态。".into()),
+                detail: updated.last_sync_message.clone().unwrap_or_else(|| "已是最新状态。".into()),
                 action: None,
                 technical_detail: None,
                 retryable: false,
@@ -574,11 +431,12 @@ fn execute_sync_for_repo(
         );
     }
 
+    // Pull
     if let Err(error) = check_cancel_requested(
         cancel_requested,
         format!("仓库 {} 在 pull 前被取消。", repo.name),
     ) {
-        log("同步任务已取消，跳过 pull。") ;
+        log("同步任务已取消，跳过 pull。");
         return build_repo_outcome(updated, error, started.elapsed().as_millis(), task_id);
     }
 
@@ -602,17 +460,18 @@ fn execute_sync_for_repo(
         }
         Err(error) => {
             if error.code == "SD-SYNC-006" {
-                log("同步任务已取消，已终止当前 Git 命令。") ;
+                log("同步任务已取消，已终止当前 Git 命令。");
             }
             return build_repo_outcome(updated, error, started.elapsed().as_millis(), task_id);
         }
     }
 
+    // Finalize
     if let Err(error) = check_cancel_requested(
         cancel_requested,
         format!("仓库 {} 在完成前被取消。", repo.name),
     ) {
-        log("同步任务已取消，停止最终状态写回。") ;
+        log("同步任务已取消，停止最终状态写回。");
         return build_repo_outcome(updated, error, started.elapsed().as_millis(), task_id);
     }
 
@@ -638,10 +497,7 @@ fn execute_sync_for_repo(
             level: NoticeLevel::Info,
             code: None,
             title: "同步完成".into(),
-            detail: updated
-                .last_sync_message
-                .clone()
-                .unwrap_or_else(|| "同步完成。".into()),
+            detail: updated.last_sync_message.clone().unwrap_or_else(|| "同步完成。".into()),
             action: None,
             technical_detail: None,
             retryable: false,
@@ -651,131 +507,48 @@ fn execute_sync_for_repo(
     )
 }
 
-fn build_repo_outcome(
-    mut updated: RepositoryRecord,
-    error: AppError,
-    duration_ms: u128,
+/// Finalize task and set end state
+fn finalize_task(
+    app: &AppHandle,
+    shared_task: Arc<Mutex<SyncTaskRecord>>,
     task_id: &str,
-) -> (RepositoryRecord, SyncTaskItemResult) {
-    let error = error
-        .with_repo_id(updated.id.clone())
-        .with_task_id(task_id.to_string());
-    let cancelled = error.code == "SD-SYNC-006";
-    let skipped = !cancelled && matches!(error.level, NoticeLevel::Warning);
-    updated.last_sync_at = Some(Utc::now().to_rfc3339());
-    updated.last_sync_status = Some(if cancelled {
-        SyncItemState::Cancelled
-    } else if skipped {
-        SyncItemState::Skipped
-    } else {
-        SyncItemState::Failed
-    });
-    updated.last_sync_message = Some(error.message.clone());
-    updated.last_error_message = if skipped || cancelled {
-        None
-    } else {
-        Some(error.message.clone())
+) -> AppResult<SyncTaskRecord> {
+    let task = {
+        let mut task = shared_task
+            .lock()
+            .map_err(|_| AppError::internal("任务状态锁不可用"))?;
+        task.running = false;
+        task.end_time = Some(Utc::now().to_rfc3339());
+        task.cancelled = task.cancelled_count > 0;
+        task.cancel_requested = false;
+        task.summary_message = build_final_summary(&task);
+        task.clone()
     };
-    updated.status.status_text = error.message.clone();
-    updated.status.last_checked_at = Some(Utc::now().to_rfc3339());
 
-    (
-        updated.clone(),
-        SyncTaskItemResult {
-            repo_id: updated.id.clone(),
-            repo_name: updated.name.clone(),
-            repo_path: updated.path.clone(),
-            state: if cancelled {
-                SyncItemState::Cancelled
-            } else if skipped {
-                SyncItemState::Skipped
-            } else {
-                SyncItemState::Failed
-            },
-            level: error.level.clone(),
-            code: Some(error.code.clone()),
-            title: error.title.clone(),
-            detail: error.message.clone(),
-            action: error.action.clone(),
-            technical_detail: error.detail.clone(),
-            retryable: error.retryable,
-            duration_ms,
-            finished_at: Utc::now().to_rfc3339(),
+    let _ = storage::append_task_log(
+        app,
+        task_id,
+        &format!("[{}] {}", Utc::now().to_rfc3339(), task.summary_message),
+    );
+    let _ = app.emit_all(
+        "sync-progress",
+        SyncProgressEvent {
+            task: task.clone(),
+            current_repo_id: None,
+            current_repo_name: None,
         },
-    )
+    );
+    Ok(task)
 }
 
-fn build_cancelled_repo_outcome(
-    updated: RepositoryRecord,
-    duration_ms: u128,
-    task_id: &str,
-    detail: String,
-) -> (RepositoryRecord, SyncTaskItemResult) {
-    build_repo_outcome(updated, cancelled_error(detail), duration_ms, task_id)
-}
-
-fn cancelled_error(detail: impl Into<String>) -> AppError {
-    AppError::new(
-        "SD-SYNC-006",
-        NoticeLevel::Warning,
-        "同步被取消",
-        "同步任务已取消。",
-    )
-    .with_action("重新发起同步")
-    .with_detail(detail)
-}
-
-fn check_cancel_requested(cancel_requested: &AtomicBool, detail: String) -> AppResult<()> {
-    if cancel_requested.load(Ordering::SeqCst) {
-        return Err(cancelled_error(detail));
+/// Persist task to storage
+fn persist_task(app: &AppHandle, task: &SyncTaskRecord) -> AppResult<()> {
+    let mut tasks = storage::load_tasks(app)?;
+    tasks.retain(|item| item.task_id != task.task_id);
+    tasks.push(task.clone());
+    storage::sort_tasks(&mut tasks);
+    if tasks.len() > 60 {
+        tasks.truncate(60);
     }
-    Ok(())
-}
-
-fn build_progress_summary(task: &SyncTaskRecord) -> String {
-    let cancelled_segment = if task.cancelled_count > 0 {
-        format!("，取消 {}", task.cancelled_count)
-    } else {
-        String::new()
-    };
-
-    if task.cancel_requested {
-        return format!(
-            "正在取消任务，已完成 {}/{}，成功 {}，跳过 {}，失败 {}{}",
-            task.completed,
-            task.total,
-            task.success_count,
-            task.skipped_count,
-            task.failed_count,
-            cancelled_segment
-        );
-    }
-
-    format!(
-        "已完成 {}/{}，成功 {}，跳过 {}，失败 {}{}",
-        task.completed,
-        task.total,
-        task.success_count,
-        task.skipped_count,
-        task.failed_count,
-        cancelled_segment
-    )
-}
-
-fn build_final_summary(task: &SyncTaskRecord) -> String {
-    if task.total == 0 {
-        return "没有可同步的仓库。".into();
-    }
-
-    if task.cancelled {
-        return format!(
-            "同步已取消：成功 {}，跳过 {}，失败 {}，取消 {}",
-            task.success_count, task.skipped_count, task.failed_count, task.cancelled_count
-        );
-    }
-
-    format!(
-        "同步完成：成功 {}，跳过 {}，失败 {}",
-        task.success_count, task.skipped_count, task.failed_count
-    )
+    storage::save_tasks(app, &tasks)
 }

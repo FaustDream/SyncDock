@@ -68,6 +68,17 @@ impl AppError {
         self
     }
 
+    pub fn with_code(mut self, code: impl Into<String>) -> Self {
+        self.code = code.into();
+        self
+    }
+
+    pub fn with_title(mut self, title: impl Into<String>) -> Self {
+        self.title = title.into();
+        self
+    }
+
+    #[allow(dead_code)]
     pub fn into_inline_notice(self) -> InlineNotice {
         InlineNotice {
             code: self.code,

@@ -66,6 +66,11 @@ export const api = {
       repoIds: repoIds?.length ? repoIds : null,
       group: group?.trim() ? group : null
     }),
+  forceSyncRepositories: (repoIds?: string[], group?: string) =>
+    invoke<SyncTaskRecord>("force_sync_repositories_command", {
+      repoIds: repoIds?.length ? repoIds : null,
+      group: group?.trim() ? group : null
+    }),
   cancelSyncTask: () => invoke<string | null>("cancel_sync_task_command"),
   getTaskLog: (taskId: string) => invoke<string>("get_task_log", { taskId }),
 
