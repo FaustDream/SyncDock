@@ -439,4 +439,5 @@ fn main() {
             clone_repository_command
         ])
         .run(tauri::generate_context!())
-        .e
+        .expect("error while running SyncDock");
+}
