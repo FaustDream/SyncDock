@@ -4,10 +4,12 @@ import AutoSizer from "react-virtualized-auto-sizer";
 import type { CSSProperties } from "react";
 import { TabBar, SummaryPill, Badge, EmptyState, InfoField } from "../components";
 import { useApp } from "../context/AppContext";
-import { UI_TEXT, statusFilterOptions } from "../constants";
+import { UI_TEXT, statusFilterOptions, LOG_PARSE_MAX_LINES, REPO_DETAIL_LOG_PREVIEW_LIMIT } from "../constants";
+
+
 import { api } from "../api";
 import { formatDateTime, formatCompactDateTime, getCompactRepoStatusLabel, formatCompactSyncMessage } from "../utils/formatters";
-import { getRepositoryMeta, sortRepositoriesByStatus } from "../utils/repoHelpers";
+import { getRepositoryMeta, getRepositoryOwnershipLabel, getRepositoryOwnershipTone, sortRepositoriesByStatus } from "../utils/repoHelpers";
 import { toneFromLogLevel } from "../utils/taskHelpers";
 import { parseTaskLog } from "../utils/logParser";
 import type { LogLevelFilter } from "../context/AppContext";
@@ -101,6 +103,7 @@ export function RepositoriesPage() {
         name: selectedRepo.name,
         path: selectedRepo.path,
         group: selectedRepo.group,
+        ownership: selectedRepo.ownership,
         note: selectedRepo.note,
         enabled: selectedRepo.enabled
       });
@@ -119,8 +122,12 @@ export function RepositoriesPage() {
             <h3>{selectedRepo.name}</h3>
             <p className="muted">独立详情视图承接编辑、日志与快捷操作。</p>
           </div>
-          <Badge tone={getRepositoryMeta(selectedRepo, settings).tone} text={getRepositoryMeta(selectedRepo, settings).label} />
+          <div className="summary-row wrap">
+            <Badge tone={getRepositoryOwnershipTone(selectedRepo.ownership)} text={getRepositoryOwnershipLabel(selectedRepo.ownership)} />
+            <Badge tone={getRepositoryMeta(selectedRepo, settings).tone} text={getRepositoryMeta(selectedRepo, settings).label} />
+          </div>
         </div>
+
         <div className="view-stack">
           <div className="summary-row wrap">
             <SummaryPill label="ahead" value={selectedRepo.status.aheadCount} tone="neutral" />
@@ -135,8 +142,18 @@ export function RepositoriesPage() {
               <input list="repo-group-options" value={repoForm.group} onChange={(e) => setRepoForm((c) => c ? { ...c, group: e.target.value } : c)} placeholder="选择或输入分组" />
               <datalist id="repo-group-options">{repoGroupOptions.map((g) => <option key={g} value={g} />)}</datalist>
             </label>
+            <label>
+              <span>仓库归属</span>
+              <select value={repoForm.ownership} onChange={(e) => setRepoForm((c) => c ? { ...c, ownership: e.target.value as typeof c.ownership } : c)}>
+                <option value="unassigned">未标注</option>
+                <option value="mine">我的</option>
+                <option value="other">其他作者</option>
+              </select>
+            </label>
             <label className="full-span">
               <span>仓库路径</span>
+
+
               <div className="path-input">
                 <input value={repoForm.path} onChange={(e) => setRepoForm((c) => c ? { ...c, path: e.target.value } : c)} />
                 <button type="button" className="ghost-button" onClick={() => void pickFolder((v) => setRepoForm((c) => c ? { ...c, path: v } : c))}>选择目录</button>
@@ -150,6 +167,7 @@ export function RepositoriesPage() {
           </div>
           <div className="info-grid compact">
             <InfoField label="remote URL" value={selectedRepo.remoteUrl || "-"} />
+            <InfoField label="仓库归属" value={getRepositoryOwnershipLabel(selectedRepo.ownership)} />
             <InfoField label="当前分支" value={selectedRepo.status.currentBranch || "-"} />
             <InfoField label="upstream" value={selectedRepo.status.upstreamName || "未配置"} />
             <InfoField label="最近同步" value={formatDateTime(selectedRepo.lastSyncAt)} />
@@ -181,8 +199,10 @@ export function RepositoriesPage() {
                 <option value="error">仅错误</option>
               </select>
             </div>
+            {selectedRepoLog.trim() ? <p className="helper">为避免超长日志导致界面卡死，仅展示最近 {REPO_DETAIL_LOG_PREVIEW_LIMIT} 条结果。</p> : null}
             <div className="log-line-list repo-log-list">
-              {filteredRepoLogLines.slice(0, 160).map((line) => (
+              {filteredRepoLogLines.slice(0, REPO_DETAIL_LOG_PREVIEW_LIMIT).map((line) => (
+
                 <div key={`${line.index}-${line.text}`} className={`log-line ${line.level}`}>
                   <span className="log-line-index">#{line.index}</span>
                   <div className="log-line-badges">
@@ -242,6 +262,7 @@ export function RepositoriesPage() {
                   <div className="repo-main">
                     <div className="repo-title-row">
                       <button className="text-link-button" onClick={() => openRepoDetail(repo.id, "repositories")} title={repo.path}>{repo.name}</button>
+                      <Badge tone={getRepositoryOwnershipTone(repo.ownership)} text={getRepositoryOwnershipLabel(repo.ownership)} />
                     </div>
                     <div className="repo-meta-row">
                       <span className="repo-cell-ellipsis" title={`分组：${repo.group}`}>{repo.group}</span>
@@ -280,7 +301,7 @@ export function RepositoriesPage() {
           </div>
           <div className="repo-table" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 400 }}>
             <div className="repo-table-row repo-table-head" style={{ flex: "0 0 auto" }}>
-              <span>仓库</span><span>组</span><span>分支</span><span>同步</span><span>结果</span><span>状态</span>
+              <span>仓库</span><span>归属</span><span>组</span><span>分支</span><span>同步</span><span>结果</span><span>状态</span>
             </div>
             <div style={{ flex: 1 }}>
               <AutoSizer>
@@ -298,6 +319,8 @@ export function RepositoriesPage() {
                               <button className="text-link-button" onClick={() => openRepoDetail(repo.id, "repositories")} title={repo.path}>{repo.name}</button>
                             </div>
                           </div>
+                          <span title={getRepositoryOwnershipLabel(repo.ownership)}><Badge tone={getRepositoryOwnershipTone(repo.ownership)} text={getRepositoryOwnershipLabel(repo.ownership)} /></span>
+
                           <span className="repo-cell-ellipsis" title={repo.group}>{repo.group}</span>
                           <span className="repo-cell-mono">{repo.status.currentBranch || "-"}</span>
                           <span className="repo-cell-mono">{formatCompactDateTime(repo.lastSyncAt)}</span>
@@ -332,7 +355,9 @@ export function RepositoriesPage() {
               <option value="error">仅错误</option>
             </select>
           </div>
+          {selectedRepoLog.trim() ? <p className="helper">为避免超长日志导致界面卡死，仅解析最近 {LOG_PARSE_MAX_LINES} 行，并对超长单行进行安全截断。</p> : null}
           <div className="log-line-list repo-log-list" style={{ flex: 1, minHeight: 400 }}>
+
             <AutoSizer>
               {({ height, width }: { height: number; width: number }) => (
                 <FixedSizeList itemSize={60} itemCount={filteredRepoLogLines.length} height={height} width={width}>
@@ -346,7 +371,9 @@ export function RepositoriesPage() {
                           {line.code ? <Badge tone={toneFromLogLevel(line.level)} text={line.code} /> : null}
                         </div>
                         <code className="log-line-text">{line.text}</code>
+                        {line.textTruncated ? <span className="log-line-truncated-hint">该行过长，已截断显示</span> : null}
                       </div>
+
                     );
                   }}
                 </FixedSizeList>

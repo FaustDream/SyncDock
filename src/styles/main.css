@@ -5,3 +5,9 @@
 @import "./components.css";
 @import "./pages.css";
 @import "./animations.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+

@@ -13,6 +13,8 @@ export type SyncItemState =
 
 export type RepoTone = "neutral" | "success" | "pending" | "warning" | "danger";
 
+export type RepositoryOwnership = "mine" | "other" | "unassigned";
+
 export type PreferredView = "overview" | "repositories" | "tasks" | "settings";
 export type ThemeMode = "system" | "light" | "dark";
 export type LanguageMode = "zh-CN" | "en-US";
@@ -44,6 +46,7 @@ export interface RepositoryRecord {
   path: string;
   remoteUrl?: string | null;
   group: string;
+  ownership: RepositoryOwnership;
   enabled: boolean;
   note: string;
   lastSyncAt?: string | null;
@@ -202,6 +205,7 @@ export interface ScannedRepository {
   currentBranch: string;
   remoteUrl?: string | null;
   group: string;
+  ownership: RepositoryOwnership;
   status: string;
   selected: boolean;
 }
@@ -210,6 +214,7 @@ export interface RepositoryDraftInput {
   path: string;
   name?: string | null;
   group?: string | null;
+  ownership: RepositoryOwnership;
   note?: string | null;
 }
 
@@ -218,6 +223,7 @@ export interface RepositoryUpdateInput {
   name: string;
   path: string;
   group: string;
+  ownership: RepositoryOwnership;
   note: string;
   enabled: boolean;
 }
@@ -233,6 +239,7 @@ export interface CloneRepositoryRequest {
   destinationParent: string;
   directoryName?: string | null;
   group?: string | null;
+  ownership: RepositoryOwnership;
   note?: string | null;
 }
 

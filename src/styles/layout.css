@@ -2,24 +2,37 @@
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
   min-height: 100vh;
-  background: var(--bg);
+  height: 100vh;
+  overflow: hidden;
+  background: linear-gradient(180deg, var(--bg) 0%, var(--bg-muted) 100%);
+  color: var(--text-primary);
 }
 
 .sidebar {
   display: flex;
   flex-direction: column;
   padding: 28px 16px;
-  background: var(--bg);
+  background: var(--bg-muted);
   border-right: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
 }
+
 
 .workspace {
   display: flex;
   flex-direction: column;
   gap: 20px;
   padding: 28px 32px;
-  background: var(--bg);
+  background: transparent;
+  min-height: 0;
+  height: 100vh;
+  overflow-y: auto;
 }
+
+
 
 .topbar {
   display: flex;
@@ -82,7 +95,12 @@
 
 .panel {
   padding: 22px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow-sm);
 }
+
 
 .panel-header {
   display: flex;
@@ -204,12 +222,26 @@
 @media (max-width: 1080px) {
   .app-shell {
     grid-template-columns: 1fr;
+    height: auto;
+    overflow: visible;
+  }
+
+  .sidebar {
+    position: static;
+    height: auto;
+    overflow: visible;
+  }
+
+  .workspace {
+    height: auto;
+    overflow: visible;
   }
 
   .topbar {
     align-items: flex-start;
     flex-direction: column;
   }
+
 
   .topbar-leading,
   .toolbar-actions {
@@ -232,6 +264,9 @@
   .repo-list-filters {
     grid-template-columns: 1fr;
   }
+
+
+
 
   .notice-header {
     align-items: flex-start;

@@ -26,7 +26,8 @@ export function SettingsPage() {
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
 
-  const currentVersion = "1.0.0";
+  const currentVersion = getCurrentVersion();
+
 
   const handleCheckUpdate = useCallback(async () => {
     try {
@@ -36,8 +37,8 @@ export function SettingsPage() {
 
       if (info.hasUpdate) {
         const confirmMsg = settings.languageMode === "en-US"
-          ? `New version ${info.latestVersion} available!\n\nCurrent: ${info.currentVersion}\nLatest: ${info.latestVersion}\n\nOpen download page?`
-          : `发现新版本 ${info.latestVersion}！\n\n当前版本：${info.currentVersion}\n最新版本：${info.latestVersion}\n\n是否前往下载页面？`;
+          ? `New version ${info.latestVersion} available!\n\nCurrent: ${info.currentVersion}\nLatest: ${info.latestVersion}\n\nOpen the latest GitHub Release download page?`
+          : `发现新版本 ${info.latestVersion}！\n\n当前版本：${info.currentVersion}\n最新版本：${info.latestVersion}\n\n是否打开 GitHub Releases 最新版本下载页？`;
         if (window.confirm(confirmMsg)) {
           await openReleasePage(info.releaseUrl);
         }
@@ -56,6 +57,7 @@ export function SettingsPage() {
       setCheckingUpdate(false);
     }
   }, [settings.languageMode, currentVersion]);
+
 
   // 主题切换时立即保存
   const handleThemeChange = useCallback((theme: ThemeMode) => {
@@ -257,7 +259,9 @@ export function SettingsPage() {
                       label="最新版本"
                       value={updateInfo.hasUpdate ? `${updateInfo.latestVersion} (有更新)` : `${updateInfo.latestVersion} (已是最新)`}
                     />
+                    <InfoField label="检查来源" value="GitHub Releases" />
                     {updateInfo.publishedAt && (
+
                       <InfoField label="发布日期" value={formatDateTime(updateInfo.publishedAt)} />
                     )}
                   </>
@@ -272,8 +276,13 @@ export function SettingsPage() {
                     查看更新详情
                   </button>
                 )}
+                {updateInfo?.releaseNotes ? (
+                  <p className="helper full-width">最近发布说明：{updateInfo.releaseNotes.split("\n").find((line) => line.trim()) || "检测到新版本，可前往 GitHub Releases 最新版本下载页查看并下载。"}</p>
+
+                ) : null}
                 <button className="ghost-button" onClick={() => void handleExportConfig()} disabled={busyAction === "export-config"}>导出诊断配置</button>
               </div>
+
             </section>
             <section className="inset-card">
               <div className="panel-header mini"><div><h4>环境状态</h4></div></div>

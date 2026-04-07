@@ -386,10 +386,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Draft state
   const [draftRepo, setDraftRepo] = useState<RepositoryDraftInput>({
-    path: "", name: "", group: "未分组", note: ""
+    path: "", name: "", group: "未分组", ownership: "unassigned", note: ""
   });
   const [cloneDraft, setCloneDraft] = useState<CloneRepositoryRequest>({
-    remoteUrl: "", destinationParent: "", directoryName: "", group: "未分组", note: ""
+    remoteUrl: "", destinationParent: "", directoryName: "", group: "未分组", ownership: "unassigned", note: ""
   });
   const [scanRootPath, setScanRootPath] = useState("");
   const [scanDepth, setScanDepth] = useState(4);
@@ -801,7 +801,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .map((repo) => ({
         ...repo,
         name: repo.name.trim() || getPathLeafName(repo.path),
-        group: repo.group.trim() || "未分组"
+        group: repo.group.trim() || "未分组",
+        ownership: repo.ownership || "unassigned"
       }));
     if (!selected.length) {
       showNotice("warning", "请至少选择一个仓库");
@@ -827,12 +828,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       showNotice("warning", "请填写本地仓库路径");
       return;
     }
+    if (!draftRepo.ownership) {
+      showNotice("warning", "请先选择仓库归属");
+      return;
+    }
     await runAction("add", async () => {
       const record = await api.addRepository(draftRepo);
       setRepositories((current) => sortRepositories([...current, record]));
       setSelectedRepoId(record.id);
       setAddModalOpen(false);
-      setDraftRepo({ path: "", name: "", group: "未分组", note: "" });
+      setDraftRepo({ path: "", name: "", group: "未分组", ownership: "unassigned", note: "" });
       showNotice("success", "仓库已添加");
     }).catch(handleError);
   }, [draftRepo, runAction, showNotice, handleError]);
@@ -842,12 +847,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       showNotice("warning", "请填写远端地址和目标目录");
       return;
     }
+    if (!cloneDraft.ownership) {
+      showNotice("warning", "请先选择仓库归属");
+      return;
+    }
     await runAction("clone", async () => {
       const record = await api.cloneRepository(cloneDraft);
       setRepositories((current) => sortRepositories([...current, record]));
       setSelectedRepoId(record.id);
       setCloneModalOpen(false);
-      setCloneDraft({ remoteUrl: "", destinationParent: "", directoryName: "", group: "未分组", note: "" });
+      setCloneDraft({ remoteUrl: "", destinationParent: "", directoryName: "", group: "未分组", ownership: "unassigned", note: "" });
       showNotice("success", "仓库已 clone 并加入管理");
     }).catch(handleError);
   }, [cloneDraft, runAction, showNotice, handleError]);
@@ -859,6 +868,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       name: repoForm.name.trim(),
       path: repoForm.path.trim(),
       group: repoForm.group.trim() || "未分组",
+      ownership: repoForm.ownership,
       note: repoForm.note.trim()
     };
     if (!nextForm.path) {

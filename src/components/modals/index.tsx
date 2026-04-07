@@ -3,8 +3,8 @@ import { useApp } from "../../context/AppContext";
 import { UI_TEXT } from "../../constants";
 import { formatDateTime, formatBytes } from "../../utils/formatters";
 import { getImportStrategyLabel, getImportStrategyDescription, getLogsDirectoryStatusLabel } from "../../utils/importHelpers";
-import { getRepositoryMeta } from "../../utils/repoHelpers";
-import type { ImportStrategy, ScannedRepository } from "../../types";
+import { getRepositoryMeta, getRepositoryOwnershipLabel, getRepositoryOwnershipTone } from "../../utils/repoHelpers";
+import type { ImportStrategy, RepositoryOwnership, ScannedRepository } from "../../types";
 
 export function ImportModal() {
   const {
@@ -137,17 +137,36 @@ export function ScanModal() {
           <div className="panel-header mini"><div><h4>扫描结果 ({scanResults.length})</h4></div></div>
           <div className="stack-list compact-list">
             {scanResults.map((repo, index) => (
-              <div key={`${repo.path}-${index}`} className="list-item preview-item">
-                <label className="check-wrap">
-                  <input type="checkbox" checked={repo.selected} onChange={() => updateScanResult(index, (r) => ({ ...r, selected: !r.selected }))} />
-                </label>
-                <div className="preview-main">
-                  <strong>{repo.name}</strong>
-                  <p className="muted">{repo.path}</p>
+              <div key={`${repo.path}-${index}`} className="list-item preview-item scan-result-item">
+                <div className="scan-result-header">
+                  <label className="check-wrap">
+                    <input type="checkbox" checked={repo.selected} onChange={() => updateScanResult(index, (r) => ({ ...r, selected: !r.selected }))} />
+                  </label>
+                  <div className="preview-main">
+                    <strong>{repo.name}</strong>
+                    <div className="summary-row wrap">
+                      <Badge tone={getRepositoryOwnershipTone(repo.ownership)} text={getRepositoryOwnershipLabel(repo.ownership)} />
+                    </div>
+                    <p className="muted">{repo.path}</p>
+                  </div>
                 </div>
-                <input value={repo.group} onChange={(e) => updateScanResult(index, (r) => ({ ...r, group: e.target.value }))} placeholder="分组" style={{ width: 100 }} />
+                <div className="form-grid two-columns scan-result-form">
+                  <label>
+                    <span>分组</span>
+                    <input value={repo.group} onChange={(e) => updateScanResult(index, (r) => ({ ...r, group: e.target.value }))} placeholder="分组" />
+                  </label>
+                  <label>
+                    <span>仓库归属</span>
+                    <select value={repo.ownership} onChange={(e) => updateScanResult(index, (r) => ({ ...r, ownership: e.target.value as typeof r.ownership }))}>
+                      <option value="unassigned">未标注</option>
+                      <option value="mine">我的</option>
+                      <option value="other">其他作者</option>
+                    </select>
+                  </label>
+                </div>
               </div>
             ))}
+
           </div>
           <div className="inline-actions wrap">
             <button className="primary-button" onClick={() => void handleImportScannedRepositories()} disabled={busyAction === "import"}>
@@ -192,6 +211,14 @@ export function AddRepoModal() {
           <input list="add-repo-group-options" value={draftRepo.group ?? ""} onChange={(e) => setDraftRepo({ ...draftRepo, group: e.target.value })} placeholder="选择或输入分组" />
           <datalist id="add-repo-group-options">{repoGroupOptions.map((g) => <option key={g} value={g} />)}</datalist>
         </label>
+        <label>
+          <span>仓库归属</span>
+          <select value={draftRepo.ownership} onChange={(e) => setDraftRepo({ ...draftRepo, ownership: e.target.value as typeof draftRepo.ownership })}>
+            <option value="unassigned">未标注</option>
+            <option value="mine">我的</option>
+            <option value="other">其他作者</option>
+          </select>
+        </label>
         <label className="full-span"><span>备注</span><textarea value={draftRepo.note ?? ""} onChange={(e) => setDraftRepo({ ...draftRepo, note: e.target.value })} rows={2} /></label>
       </div>
       <div className="modal-footer">
@@ -203,6 +230,7 @@ export function AddRepoModal() {
     </Modal>
   );
 }
+
 
 export function CloneRepoModal() {
   const {
@@ -235,6 +263,14 @@ export function CloneRepoModal() {
           <input list="clone-repo-group-options" value={cloneDraft.group ?? ""} onChange={(e) => setCloneDraft({ ...cloneDraft, group: e.target.value })} placeholder="选择或输入分组" />
           <datalist id="clone-repo-group-options">{repoGroupOptions.map((g) => <option key={g} value={g} />)}</datalist>
         </label>
+        <label>
+          <span>仓库归属</span>
+          <select value={cloneDraft.ownership} onChange={(e) => setCloneDraft({ ...cloneDraft, ownership: e.target.value as typeof cloneDraft.ownership })}>
+            <option value="unassigned">未标注</option>
+            <option value="mine">我的</option>
+            <option value="other">其他作者</option>
+          </select>
+        </label>
         <label className="full-span"><span>备注</span><textarea value={cloneDraft.note ?? ""} onChange={(e) => setCloneDraft({ ...cloneDraft, note: e.target.value })} rows={2} /></label>
       </div>
       <div className="modal-footer">
@@ -246,3 +282,4 @@ export function CloneRepoModal() {
     </Modal>
   );
 }
+

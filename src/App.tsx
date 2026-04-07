@@ -40,22 +40,30 @@ function AppContent() {
   // Theme
   useEffect(() => {
     const root = document.documentElement;
+
+    const applyTheme = (isDark: boolean) => {
+      root.classList.toggle("dark", isDark);
+      root.setAttribute("data-theme", isDark ? "dark" : "light");
+      root.style.colorScheme = isDark ? "dark" : "light";
+    };
+
     if (settings.themeMode === "dark") {
-      root.classList.add("dark");
-    } else if (settings.themeMode === "light") {
-      root.classList.remove("dark");
-    } else {
-      const media = window.matchMedia("(prefers-color-scheme: dark)");
-      if (media.matches) root.classList.add("dark");
-      else root.classList.remove("dark");
-      const handleChange = () => {
-        if (media.matches) root.classList.add("dark");
-        else root.classList.remove("dark");
-      };
-      media.addEventListener("change", handleChange);
-      return () => media.removeEventListener("change", handleChange);
+      applyTheme(true);
+      return;
     }
+
+    if (settings.themeMode === "light") {
+      applyTheme(false);
+      return;
+    }
+
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const handleChange = () => applyTheme(media.matches);
+    handleChange();
+    media.addEventListener("change", handleChange);
+    return () => media.removeEventListener("change", handleChange);
   }, [settings.themeMode]);
+
 
   // Sync progress listener
   useEffect(() => {

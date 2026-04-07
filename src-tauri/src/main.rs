@@ -146,6 +146,7 @@ fn import_scanned_repositories(
             path: scanned.path,
             name: Some(scanned.name),
             group: Some(scanned.group),
+            ownership: scanned.ownership,
             note: None,
         };
         if let Ok(record) = create_repository_record(&settings, &existing, input) {
@@ -215,6 +216,7 @@ fn update_repository(app: AppHandle, input: RepositoryUpdateInput) -> AppResult<
         input.group.trim().to_string()
     };
     repo.note = input.note.trim().to_string();
+    repo.ownership = input.ownership;
     repo.enabled = input.enabled;
     repo.remote_url = inspection.remote_url;
     repo.status = inspection.status;
@@ -318,6 +320,7 @@ fn clone_repository_command(
             path,
             name: None,
             group: request.group,
+            ownership: request.ownership,
             note: request.note,
         },
     )?;
@@ -357,6 +360,7 @@ fn create_repository_record(
             .group
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| "未分组".into()),
+        ownership: input.ownership,
         enabled: true,
         note: input.note.unwrap_or_default(),
         last_sync_at: None,
@@ -435,5 +439,4 @@ fn main() {
             clone_repository_command
         ])
         .run(tauri::generate_context!())
-        .expect("error while running SyncDock");
-}
+        .e

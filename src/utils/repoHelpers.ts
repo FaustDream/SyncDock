@@ -1,4 +1,10 @@
-import type { AppSettings, RepositoryRecord, RepoTone, ScannedRepository } from "../types";
+import type { AppSettings, RepositoryOwnership, RepositoryRecord, RepoTone, ScannedRepository } from "../types";
+
+const OWNERSHIP_LABELS: Record<RepositoryOwnership, string> = {
+  mine: "我的",
+  other: "其他作者",
+  unassigned: "未标注"
+};
 
 /**
  * 获取仓库状态元数据
@@ -36,8 +42,6 @@ export function getRepositoryMeta(repo: RepositoryRecord, settings: AppSettings)
     return { tone: "neutral", label: "已取消" };
   }
   if (repo.lastSyncStatus === "skipped") {
-    // 检查跳过的原因是否已解决
-    // 跳过原因：本地改动、未跟踪文件、detached HEAD、操作中、无 upstream
     const skipReasonResolved =
       !repo.status.hasUncommittedChanges &&
       !(settings.skipUntrackedFiles && repo.status.hasUntrackedFiles) &&
@@ -46,7 +50,6 @@ export function getRepositoryMeta(repo: RepositoryRecord, settings: AppSettings)
       repo.status.upstreamConfigured;
 
     if (skipReasonResolved) {
-      // 跳过原因已解决，重新判断是否需要同步
       if (repo.status.syncRequired) {
         return { tone: "pending", label: `待同步 · behind ${repo.status.behindCount}` };
       }
@@ -58,6 +61,16 @@ export function getRepositoryMeta(repo: RepositoryRecord, settings: AppSettings)
     return { tone: "success", label: "已同步" };
   }
   return { tone: "success", label: "状态正常" };
+}
+
+export function getRepositoryOwnershipLabel(ownership: RepositoryOwnership): string {
+  return OWNERSHIP_LABELS[ownership] ?? OWNERSHIP_LABELS.unassigned;
+}
+
+export function getRepositoryOwnershipTone(ownership: RepositoryOwnership): RepoTone {
+  if (ownership === "mine") return "success";
+  if (ownership === "other") return "pending";
+  return "neutral";
 }
 
 /**
@@ -132,7 +145,8 @@ export function normalizeScannedRepositories(repositories: ScannedRepository[]):
   return repositories.map((repo) => ({
     ...repo,
     name: repo.name.trim() || getPathLeafName(repo.path),
-    group: repo.group.trim() || "未分组"
+    group: repo.group.trim() || "未分组",
+    ownership: repo.ownership || "unassigned"
   }));
 }
 

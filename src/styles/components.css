@@ -2,11 +2,12 @@
 .brand-card,
 .card,
 .modal-panel {
-  background: var(--bg);
+  background: var(--surface);
   border-radius: 18px;
   border: 1px solid var(--border);
   box-shadow: var(--shadow-sm);
 }
+
 
 .brand-card {
   padding: 22px;
@@ -84,10 +85,11 @@
   gap: 8px;
   border-radius: 999px;
   padding: 6px 12px;
-  background: var(--bg-muted);
+  background: var(--surface-elevated);
   border: 1px solid var(--border);
   color: var(--text-secondary);
 }
+
 
 .summary-pill strong {
   font-size: 1rem;
@@ -133,14 +135,17 @@
   padding: 10px 15px;
   border-radius: 12px;
   border: 1px solid var(--border);
-  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, opacity 0.18s ease;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, opacity 0.18s ease, transform 0.18s ease;
 }
+
 
 .primary-button:hover,
 .ghost-button:hover,
 .danger-button:hover {
   border-color: currentColor;
+  transform: translateY(-1px);
 }
+
 
 .primary-button:disabled,
 .ghost-button:disabled,
@@ -156,15 +161,29 @@
 }
 
 .ghost-button {
-  background: var(--bg);
+  background: var(--surface);
   color: var(--text-secondary);
 }
 
+.ghost-button:hover {
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+}
+
+.ghost-button.compact,
+.primary-button.compact {
+  padding: 6px 14px;
+  font-size: 13px;
+}
+
+
+
 .danger-button {
   background: var(--danger-soft);
-  color: var(--danger);
+  color: var(--danger-text);
   border-color: var(--danger-border-soft);
 }
+
 
 .text-link-button {
   padding: 0;
@@ -184,7 +203,10 @@
   padding: 14px 18px;
   font-weight: 500;
   border: 1px solid var(--border);
+  background: var(--surface-elevated);
+  box-shadow: var(--shadow-sm);
 }
+
 
 .notice.success {
   background: var(--success-soft);
@@ -264,9 +286,10 @@
 .info-field {
   padding: 14px 16px;
   border-radius: 14px;
-  background: var(--bg-muted);
+  background: var(--surface-elevated);
   border: 1px solid var(--border);
 }
+
 
 .info-field span {
   display: block;
@@ -316,7 +339,7 @@
   height: 28px;
   border-radius: 8px;
   border: 1px solid var(--border);
-  background: var(--bg);
+  background: var(--surface);
   color: var(--text-secondary);
   font-size: 18px;
   display: flex;
@@ -324,6 +347,7 @@
   justify-content: center;
   cursor: pointer;
 }
+
 
 .tab-bar-with-action .icon-button:hover:not(:disabled) {
   border-color: var(--primary);
@@ -403,9 +427,10 @@
 .group-card {
   padding: 18px;
   border-radius: 16px;
-  background: var(--bg-muted);
+  background: var(--surface-elevated);
   border: 1px solid var(--border);
 }
+
 
 .group-grid {
   display: grid;

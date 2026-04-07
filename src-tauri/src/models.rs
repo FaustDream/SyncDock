@@ -57,6 +57,20 @@ pub enum SyncMode {
     Rebase,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum RepositoryOwnership {
+    Mine,
+    Other,
+    Unassigned,
+}
+
+impl Default for RepositoryOwnership {
+    fn default() -> Self {
+        Self::Unassigned
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryStatus {
@@ -105,6 +119,8 @@ pub struct RepositoryRecord {
     pub path: String,
     pub remote_url: Option<String>,
     pub group: String,
+    #[serde(default)]
+    pub ownership: RepositoryOwnership,
     pub enabled: bool,
     pub note: String,
     pub last_sync_at: Option<String>,
@@ -337,6 +353,8 @@ pub struct ScannedRepository {
     pub current_branch: String,
     pub remote_url: Option<String>,
     pub group: String,
+    #[serde(default)]
+    pub ownership: RepositoryOwnership,
     pub status: String,
     pub selected: bool,
 }
@@ -347,6 +365,7 @@ pub struct RepositoryDraftInput {
     pub path: String,
     pub name: Option<String>,
     pub group: Option<String>,
+    pub ownership: RepositoryOwnership,
     pub note: Option<String>,
 }
 
@@ -357,6 +376,7 @@ pub struct RepositoryUpdateInput {
     pub name: String,
     pub path: String,
     pub group: String,
+    pub ownership: RepositoryOwnership,
     pub note: String,
     pub enabled: bool,
 }
@@ -376,6 +396,7 @@ pub struct CloneRepositoryRequest {
     pub destination_parent: String,
     pub directory_name: Option<String>,
     pub group: Option<String>,
+    pub ownership: RepositoryOwnership,
     pub note: Option<String>,
 }
 

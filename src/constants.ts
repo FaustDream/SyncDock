@@ -34,7 +34,13 @@ export const defaultLogsDiagnostics: LogsDiagnostics = {
   writable: false
 };
 
+export const LOG_PARSE_MAX_LINES = 2000;
+export const LOG_LINE_TEXT_MAX_LENGTH = 1200;
+export const LOG_VIRTUALIZATION_THRESHOLD = 20;
+export const REPO_DETAIL_LOG_PREVIEW_LIMIT = 200;
+
 export const statusFilterOptions = [
+
   { value: "all", label: "全部状态" },
   { value: "needsSync", label: "待同步" },
   { value: "warning", label: "受保护跳过" },

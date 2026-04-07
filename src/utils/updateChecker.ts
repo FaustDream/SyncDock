@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/tauri";
+import tauriConfig from "../../src-tauri/tauri.conf.json";
 
 export interface UpdateInfo {
   currentVersion: string;
@@ -7,6 +8,7 @@ export interface UpdateInfo {
   releaseUrl: string;
   releaseNotes?: string;
   publishedAt?: string;
+  source: "github-releases";
 }
 
 export interface GitHubRelease {
@@ -21,12 +23,15 @@ export interface GitHubRelease {
 
 const GITHUB_REPO_OWNER = "FaustDream";
 const GITHUB_REPO_NAME = "SyncDock";
+const DEFAULT_VERSION = "1.0.0";
+const GITHUB_RELEASES_PAGE = `https://github.com/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/releases`;
+const GITHUB_LATEST_RELEASE_PAGE = `${GITHUB_RELEASES_PAGE}/latest`;
 
 /**
- * 从 package.json 获取当前版本
+ * 从 tauri 配置获取当前版本
  */
 export function getCurrentVersion(): string {
-  return "1.0.0"; // Will be updated from tauri.conf.json
+  return tauriConfig.package?.version || DEFAULT_VERSION;
 }
 
 /**
@@ -35,9 +40,9 @@ export function getCurrentVersion(): string {
  */
 export function compareVersions(a: string, b: string): number {
   const parseVersion = (v: string) => {
-    const match = v.match(/^v?(\d+)\.(\d+)\.(\d+)/);
+    const match = v.trim().match(/^v?(\d+)\.(\d+)\.(\d+)/);
     if (!match) return [0, 0, 0];
-    return [parseInt(match[1]), parseInt(match[2]), parseInt(match[3])];
+    return [parseInt(match[1], 10), parseInt(match[2], 10), parseInt(match[3], 10)];
   };
 
   const versionA = parseVersion(a);
@@ -51,15 +56,15 @@ export function compareVersions(a: string, b: string): number {
 }
 
 /**
- * 从 GitHub API 获取最新版本信息
+ * 从 GitHub Releases API 获取最新稳定版信息
  */
 export async function checkForUpdate(currentVersion: string): Promise<UpdateInfo> {
-  const releaseUrl = `https://api.github.com/repos/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/releases/latest`;
+  const releaseApiUrl = `https://api.github.com/repos/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/releases/latest`;
 
   try {
-    const response = await fetch(releaseUrl, {
+    const response = await fetch(releaseApiUrl, {
       headers: {
-        "Accept": "application/vnd.github.v3+json",
+        Accept: "application/vnd.github+json",
         "User-Agent": "SyncDock-Update-Checker"
       }
     });
@@ -76,9 +81,10 @@ export async function checkForUpdate(currentVersion: string): Promise<UpdateInfo
       currentVersion,
       latestVersion,
       hasUpdate,
-      releaseUrl: release.html_url,
+      releaseUrl: release.html_url || GITHUB_LATEST_RELEASE_PAGE,
       releaseNotes: release.body,
-      publishedAt: release.published_at
+      publishedAt: release.published_at,
+      source: "github-releases"
     };
   } catch (error) {
     console.error("Failed to check for updates:", error);
@@ -86,7 +92,8 @@ export async function checkForUpdate(currentVersion: string): Promise<UpdateInfo
       currentVersion,
       latestVersion: currentVersion,
       hasUpdate: false,
-      releaseUrl: `https://github.com/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/releases`
+      releaseUrl: GITHUB_LATEST_RELEASE_PAGE,
+      source: "github-releases"
     };
   }
 }
@@ -102,3 +109,5 @@ export async function openReleasePage(url: string): Promise<void> {
     window.open(url, "_blank");
   }
 }
+
+
