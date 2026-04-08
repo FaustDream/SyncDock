@@ -1,62 +1,53 @@
 @echo off
 chcp 65001 >nul
+setlocal
+
+set VERSION=2.0.0
+set RELEASE_ROOT=Releases\v%VERSION%
+set INSTALLER_DIR=%RELEASE_ROOT%\installer
+set PORTABLE_DIR=%RELEASE_ROOT%\portable
+set PORTABLE_NAME=SyncDock_%VERSION%_x64_portable.zip
+
 echo ========================================
-echo   SyncDock v1.0.0 打包脚本
+echo   SyncDock v%VERSION% Release Build
 echo ========================================
 echo.
 
-REM 设置版本号
-set VERSION=1.0.0
-set RELEASE_DIR=Releases\v%VERSION%
+if exist "dist" rmdir /s /q "dist"
+if exist "src-tauri\target" rmdir /s /q "src-tauri\target"
 
-REM 创建发布目录
-echo [1/4] 创建发布目录...
-if not exist "%RELEASE_DIR%\安装版" mkdir "%RELEASE_DIR%\安装版"
-if not exist "%RELEASE_DIR%\便携版" mkdir "%RELEASE_DIR%\便携版"
+if exist "%INSTALLER_DIR%" rmdir /s /q "%INSTALLER_DIR%"
+if exist "%PORTABLE_DIR%" rmdir /s /q "%PORTABLE_DIR%"
+if not exist "%INSTALLER_DIR%" mkdir "%INSTALLER_DIR%"
+if not exist "%PORTABLE_DIR%" mkdir "%PORTABLE_DIR%"
 
-REM 执行 Tauri 构建
-echo [2/4] 执行 Tauri 构建（这可能需要几分钟）...
+echo [1/4] Building desktop application...
 call npm run tauri build
+if %ERRORLEVEL% neq 0 exit /b 1
 
-if %ERRORLEVEL% neq 0 (
-    echo 构建失败！
-    pause
-    exit /b 1
+echo [2/4] Copying installer package...
+for %%f in (src-tauri\target\release\bundle\nsis\*.exe) do copy "%%f" "%INSTALLER_DIR%\" >nul
+
+echo [3/4] Preparing portable package...
+if exist "src-tauri\target\release\SyncDock.exe" (
+  copy "src-tauri\target\release\SyncDock.exe" "%PORTABLE_DIR%\SyncDock.exe" >nul
+) else (
+  copy "src-tauri\target\release\syncdock-desktop.exe" "%PORTABLE_DIR%\SyncDock.exe" >nul
 )
-
-echo [3/4] 整理安装版文件...
-REM 复制 NSIS 安装包到安装版目录
-for %%f in (src-tauri\target\release\bundle\nsis\*.exe) do (
-    copy "%%f" "%RELEASE_DIR%\安装版\" >nul
-    echo   - %%~nxf
-)
-
-echo [4/4] 整理便携版文件...
-REM 复制编译后的 exe 文件作为便携版
-copy "src-tauri\target\release\syncdock-desktop.exe" "%RELEASE_DIR%\便携版\SyncDock.exe" >nul
-echo   - SyncDock.exe（便携版，需安装 WebView2）
-
-REM 创建便携版说明文件
-echo SyncDock v%VERSION% 便携版 > "%RELEASE_DIR%\便携版\README.txt"
-echo. >> "%RELEASE_DIR%\便携版\README.txt"
-echo 使用说明： >> "%RELEASE_DIR%\便携版\README.txt"
-echo 1. 确保已安装 Microsoft Edge WebView2 运行时 >> "%RELEASE_DIR%\便携版\README.txt"
-echo 2. 双击 SyncDock.exe 即可运行 >> "%RELEASE_DIR%\便携版\README.txt"
-echo 3. 数据存储在 %%USERPROFILE%%\.syncdock 目录 >> "%RELEASE_DIR%\便携版\README.txt"
-echo. >> "%RELEASE_DIR%\便携版\README.txt"
-echo 下载 WebView2: https://developer.microsoft.com/en-us/microsoft-edge/webview2/ >> "%RELEASE_DIR%\便携版\README.txt"
-
+(
+echo SyncDock v%VERSION% portable package
 echo.
-echo ========================================
-echo   构建完成！
-echo ========================================
-echo.
-echo 文件位置：
-echo   安装版: %RELEASE_DIR%\安装版\
-echo   便携版: %RELEASE_DIR%\便携版\
+echo 1. Ensure Microsoft Edge WebView2 Runtime is installed.
+echo 2. Run SyncDock.exe directly.
+echo 3. User data is stored in the local application data directory.
+) > "%PORTABLE_DIR%\README.txt"
+
+powershell -NoProfile -Command "if (Test-Path '%RELEASE_ROOT%\%PORTABLE_NAME%') { Remove-Item '%RELEASE_ROOT%\%PORTABLE_NAME%' -Force }; Compress-Archive -Path '%PORTABLE_DIR%\*' -DestinationPath '%RELEASE_ROOT%\%PORTABLE_NAME%' -Force"
+if %ERRORLEVEL% neq 0 exit /b 1
+
+echo [4/4] Release build completed.
+echo Installer: %INSTALLER_DIR%
+echo Portable: %RELEASE_ROOT%\%PORTABLE_NAME%
 echo.
 
-REM 打开发布目录
-explorer "%RELEASE_DIR%"
-
-pause
+endlocal

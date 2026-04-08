@@ -4,7 +4,7 @@ import { UI_TEXT } from "../../constants";
 import { formatDateTime, formatBytes } from "../../utils/formatters";
 import { getImportStrategyLabel, getImportStrategyDescription, getLogsDirectoryStatusLabel } from "../../utils/importHelpers";
 import { getRepositoryMeta, getRepositoryOwnershipLabel, getRepositoryOwnershipTone } from "../../utils/repoHelpers";
-import type { ImportStrategy, RepositoryOwnership, ScannedRepository } from "../../types";
+import type { ImportStrategy, RepositoryOwnership } from "../../types";
 
 export function ImportModal() {
   const {
@@ -105,80 +105,6 @@ export function ImportModal() {
   );
 }
 
-export function ScanModal() {
-  const {
-    scanModalOpen, setScanModalOpen,
-    scanRootPath, setScanRootPath, scanDepth, setScanDepth,
-    scanResults, setScanResults, updateScanResult,
-    handleScanRepositories, handleImportScannedRepositories,
-    busyAction, pickFolder
-  } = useApp();
-
-  return (
-    <Modal open={scanModalOpen} title="扫描本地目录" onClose={() => setScanModalOpen(false)}>
-      <div className="form-grid">
-        <label className="full-span">
-          <span>扫描根目录</span>
-          <div className="path-input">
-            <input value={scanRootPath} onChange={(e) => setScanRootPath(e.target.value)} placeholder="选择要递归扫描的目录" />
-            <button type="button" className="ghost-button" onClick={() => void pickFolder(setScanRootPath)}>选择</button>
-          </div>
-        </label>
-        <label>
-          <span>扫描深度</span>
-          <input type="number" min={1} max={12} value={scanDepth} onChange={(e) => setScanDepth(Number(e.target.value) || 4)} />
-        </label>
-      </div>
-      <div className="inline-actions wrap">
-        <button className="primary-button" onClick={() => void handleScanRepositories()} disabled={busyAction === "scan"}>开始扫描</button>
-      </div>
-      {scanResults.length > 0 ? (
-        <div className="view-stack">
-          <div className="panel-header mini"><div><h4>扫描结果 ({scanResults.length})</h4></div></div>
-          <div className="stack-list compact-list">
-            {scanResults.map((repo, index) => (
-              <div key={`${repo.path}-${index}`} className="list-item preview-item scan-result-item">
-                <div className="scan-result-header">
-                  <label className="check-wrap">
-                    <input type="checkbox" checked={repo.selected} onChange={() => updateScanResult(index, (r) => ({ ...r, selected: !r.selected }))} />
-                  </label>
-                  <div className="preview-main">
-                    <strong>{repo.name}</strong>
-                    <div className="summary-row wrap">
-                      <Badge tone={getRepositoryOwnershipTone(repo.ownership)} text={getRepositoryOwnershipLabel(repo.ownership)} />
-                    </div>
-                    <p className="muted">{repo.path}</p>
-                  </div>
-                </div>
-                <div className="form-grid two-columns scan-result-form">
-                  <label>
-                    <span>分组</span>
-                    <input value={repo.group} onChange={(e) => updateScanResult(index, (r) => ({ ...r, group: e.target.value }))} placeholder="分组" />
-                  </label>
-                  <label>
-                    <span>仓库归属</span>
-                    <select value={repo.ownership} onChange={(e) => updateScanResult(index, (r) => ({ ...r, ownership: e.target.value as typeof r.ownership }))}>
-                      <option value="unassigned">未标注</option>
-                      <option value="mine">我的</option>
-                      <option value="other">其他作者</option>
-                    </select>
-                  </label>
-                </div>
-              </div>
-            ))}
-
-          </div>
-          <div className="inline-actions wrap">
-            <button className="primary-button" onClick={() => void handleImportScannedRepositories()} disabled={busyAction === "import"}>
-              导入选中项 ({scanResults.filter((r) => r.selected).length})
-            </button>
-          </div>
-        </div>
-      ) : null}
-    </Modal>
-  );
-}
-
 export function AddRepoModal() {
   const {
     addModalOpen, setAddModalOpen,
@@ -197,7 +123,7 @@ export function AddRepoModal() {
 
   return (
     <Modal open={addModalOpen} title="手动添加本地仓库" onClose={() => setAddModalOpen(false)}>
-      <div className="form-grid">
+      <div className="form-grid add-repo-form">
         <label className="full-span">
           <span>仓库路径</span>
           <div className="path-input">
@@ -208,7 +134,7 @@ export function AddRepoModal() {
         <label><span>仓库名称</span><input value={draftRepo.name ?? ""} onChange={(e) => setDraftRepo({ ...draftRepo, name: e.target.value })} placeholder="留空则使用目录名" /></label>
         <label>
           <span>分组</span>
-          <input list="add-repo-group-options" value={draftRepo.group ?? ""} onChange={(e) => setDraftRepo({ ...draftRepo, group: e.target.value })} placeholder="选择或输入分组" />
+          <input className="group-combobox-input" list="add-repo-group-options" value={draftRepo.group ?? ""} onChange={(e) => setDraftRepo({ ...draftRepo, group: e.target.value })} placeholder="选择或输入分组" />
           <datalist id="add-repo-group-options">{repoGroupOptions.map((g) => <option key={g} value={g} />)}</datalist>
         </label>
         <label>
@@ -221,7 +147,7 @@ export function AddRepoModal() {
         </label>
         <label className="full-span"><span>备注</span><textarea value={draftRepo.note ?? ""} onChange={(e) => setDraftRepo({ ...draftRepo, note: e.target.value })} rows={2} /></label>
       </div>
-      <div className="modal-footer">
+      <div className="modal-footer add-repo-modal-footer">
         <button className="ghost-button" onClick={() => setAddModalOpen(false)}>取消</button>
         <button className="primary-button" onClick={() => void handleAddRepository()} disabled={isAdding}>
           {isAdding ? <><span className="inline-spinner"></span>正在添加...</> : "添加仓库"}

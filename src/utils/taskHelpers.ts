@@ -41,6 +41,8 @@ export function getTaskModeLabel(mode: string): string {
     case "all": return "同步全部";
     case "group": return "分组同步";
     case "selected": return "选中同步";
+    case "refresh-all": return "刷新全部状态";
+    case "refresh-selected": return "刷新选中状态";
     case "force-all": return "强制同步全部";
     case "force-group": return "强制分组同步";
     case "force-selected": return "强制选中同步";

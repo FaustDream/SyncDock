@@ -228,9 +228,6 @@ fn diff_settings_keys(current: &AppSettings, incoming: &AppSettings) -> Vec<Stri
     if current.show_debug_logs != incoming.show_debug_logs { changes.push("showDebugLogs".to_string()); }
     if current.log_retention_days != incoming.log_retention_days { changes.push("logRetentionDays".to_string()); }
     if current.logs_directory != incoming.logs_directory { changes.push("logsDirectory".to_string()); }
-    if current.default_scan_root != incoming.default_scan_root { changes.push("defaultScanRoot".to_string()); }
-    if current.ignored_directories != incoming.ignored_directories { changes.push("ignoredDirectories".to_string()); }
-    if current.scan_depth != incoming.scan_depth { changes.push("scanDepth".to_string()); }
     if current.default_view != incoming.default_view { changes.push("defaultView".to_string()); }
     if current.theme_mode != incoming.theme_mode { changes.push("themeMode".to_string()); }
     if current.language_mode != incoming.language_mode { changes.push("languageMode".to_string()); }
@@ -269,17 +266,11 @@ fn merge_settings(current: AppSettings, incoming: &AppSettings) -> AppSettings {
     AppSettings {
         concurrent_limit: incoming.concurrent_limit,
         command_timeout_secs: incoming.command_timeout_secs,
+        auto_retry_transient_failures: incoming.auto_retry_transient_failures,
         skip_untracked_files: incoming.skip_untracked_files,
         show_debug_logs: incoming.show_debug_logs,
         log_retention_days: incoming.log_retention_days,
         logs_directory: current.logs_directory.or(incoming.logs_directory.clone()),
-        default_scan_root: current.default_scan_root.or(incoming.default_scan_root.clone()),
-        ignored_directories: if incoming.ignored_directories.is_empty() {
-            current.ignored_directories
-        } else {
-            incoming.ignored_directories.clone()
-        },
-        scan_depth: incoming.scan_depth,
         default_view: incoming.default_view.clone(),
         theme_mode: current.theme_mode,
         language_mode: current.language_mode,

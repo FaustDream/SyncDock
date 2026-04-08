@@ -72,14 +72,7 @@ pub fn normalize_settings(mut settings: AppSettings) -> AppSettings {
         0 => 0,
         days => days.clamp(1, 90),
     };
-    settings.scan_depth = settings.scan_depth.clamp(1, 12);
     settings.logs_directory = normalize_optional_string(settings.logs_directory.as_deref());
-    settings.default_scan_root = normalize_optional_string(settings.default_scan_root.as_deref());
-    settings.ignored_directories = settings.ignored_directories
-        .into_iter()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .collect();
     settings.default_view = match settings.default_view.trim() {
         "overview" | "repositories" | "tasks" | "settings" => settings.default_view.trim().to_string(),
         _ => "overview".into(),

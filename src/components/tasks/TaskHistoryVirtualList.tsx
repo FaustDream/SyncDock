@@ -4,9 +4,9 @@ import { FixedSizeList } from "react-window";
 import { Badge, EmptyState } from "../index";
 import type { SyncTaskRecord } from "../../types";
 import { formatDateTime, formatDuration } from "../../utils/formatters";
-import { getTaskModeLabel, getTaskStatusHint, getTaskStatusLabel, toneFromTaskRecord } from "../../utils/taskHelpers";
+import { getTaskModeLabel, getTaskStatusLabel, toneFromTaskRecord } from "../../utils/taskHelpers";
 
-const TASK_HISTORY_ROW_HEIGHT = 132;
+const TASK_HISTORY_ROW_HEIGHT = 74;
 
 interface TaskHistoryVirtualListProps {
   tasks: SyncTaskRecord[];
@@ -20,8 +20,6 @@ interface TaskHistoryVirtualListProps {
 
 export function TaskHistoryVirtualList({
   tasks,
-  activeTaskId,
-  currentTaskRepoName,
   selectedTaskId,
   busyAction,
   onOpenTaskDetail,
@@ -32,74 +30,91 @@ export function TaskHistoryVirtualList({
   }
 
   return (
-    <div className="theme-elevated-block" style={{ height: 560 }}>
+    <div className="theme-elevated-block task-history-list-shell">
+      <div className="task-history-list-head">
+        <span>任务时间</span>
+        <span>类型</span>
+        <span>摘要</span>
+        <span>状态</span>
+        <span>操作</span>
+      </div>
+      <div className="task-history-list-body">
+        <AutoSizer>
+          {({ height, width }: { height: number; width: number }) => (
+            <FixedSizeList height={height} width={width} itemCount={tasks.length} itemSize={TASK_HISTORY_ROW_HEIGHT} overscanCount={8}>
+              {({ index, style }: { index: number; style: CSSProperties }) => {
+                const task = tasks[index];
+                const isSelected = selectedTaskId === task.taskId;
+                const isCancelling = busyAction === "cancel-task" && task.cancelRequested;
+                const durationMs = task.items.reduce((sum, item) => sum + item.durationMs, 0);
 
-      <AutoSizer>
-        {({ height, width }: { height: number; width: number }) => (
-          <FixedSizeList height={height} width={width} itemCount={tasks.length} itemSize={TASK_HISTORY_ROW_HEIGHT} overscanCount={6}>
-            {({ index, style }: { index: number; style: CSSProperties }) => {
-              const task = tasks[index];
-              const taskStatusHint = task.taskId === activeTaskId ? getTaskStatusHint(task, currentTaskRepoName) : getTaskStatusHint(task);
-              const isSelected = selectedTaskId === task.taskId;
-              const isCancelling = busyAction === "cancel-task" && task.cancelRequested;
+                const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onOpenTaskDetail(task.taskId);
+                  }
+                };
 
-              const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  onOpenTaskDetail(task.taskId);
-                }
-              };
-
-              return (
-                <div style={style} className="pb-3">
-                  <div
-                    className={`task-item interactive ${isSelected ? "active" : ""}`}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => onOpenTaskDetail(task.taskId)}
-                    onKeyDown={handleKeyDown}
-                  >
-                    <div className="task-item-main">
-                      <div className="task-item-head">
+                return (
+                  <div style={style} className="task-history-row-wrap">
+                    <div
+                      className={`task-history-row ${isSelected ? "active" : ""}`}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => onOpenTaskDetail(task.taskId)}
+                      onKeyDown={handleKeyDown}
+                    >
+                      <div className="task-history-primary">
+                        <strong>{formatDateTime(task.startTime)}</strong>
+                        <span className="muted task-history-secondary">{task.taskId}</span>
+                      </div>
+                      <div className="task-history-mode">
                         <strong>{getTaskModeLabel(task.mode)}</strong>
+                        <span className="muted task-history-secondary">{formatDuration(durationMs)}</span>
+                      </div>
+                      <div className="task-history-summary">
+                        <span className="task-history-summary-text" title={task.summaryMessage}>{task.summaryMessage}</span>
+                        <span className="muted task-history-secondary">
+                          {`成功 ${task.successCount} · 跳过 ${task.skippedCount} · 失败 ${task.failedCount}${task.cancelledCount > 0 ? ` · 取消 ${task.cancelledCount}` : ""}`}
+                        </span>
+                      </div>
+                      <div className="task-history-status">
                         <Badge tone={toneFromTaskRecord(task)} text={getTaskStatusLabel(task)} />
                       </div>
-                      <p className="muted">{formatDateTime(task.startTime)} · {task.summaryMessage}</p>
-                      {taskStatusHint ? <p className="helper">{taskStatusHint}</p> : null}
-                      <div className="task-item-meta">
-                        <span>任务 ID：{task.taskId}</span>
-                        <span>目标仓库：{task.total}</span>
-                        <span>耗时：{formatDuration(task.items.reduce((sum, item) => sum + item.durationMs, 0))}</span>
+                      <div className="task-history-actions">
+                        {task.running ? (
+                          <button
+                            className="ghost-button compact"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onRequestCancel(task.taskId);
+                            }}
+                            onKeyDown={(event) => event.stopPropagation()}
+                            disabled={task.cancelRequested || busyAction === "cancel-task"}
+                          >
+                            {isCancelling || task.cancelRequested ? "取消中..." : "取消"}
+                          </button>
+                        ) : (
+                          <button
+                            className="ghost-button compact"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onOpenTaskDetail(task.taskId);
+                            }}
+                            onKeyDown={(event) => event.stopPropagation()}
+                          >
+                            详情
+                          </button>
+                        )}
                       </div>
-                    </div>
-                    <div className="task-item-side">
-                      <div className="task-metrics">
-                        <Badge tone="success" text={`成功 ${task.successCount}`} />
-                        <Badge tone="warning" text={`跳过 ${task.skippedCount}`} />
-                        <Badge tone="danger" text={`失败 ${task.failedCount}`} />
-                        {task.cancelledCount > 0 ? <Badge tone="neutral" text={`取消 ${task.cancelledCount}`} /> : null}
-                      </div>
-                      {task.running ? (
-                        <button
-                          className="ghost-button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            onRequestCancel(task.taskId);
-                          }}
-                          onKeyDown={(event) => event.stopPropagation()}
-                          disabled={task.cancelRequested || busyAction === "cancel-task"}
-                        >
-                          {isCancelling || task.cancelRequested ? "取消中..." : "取消任务"}
-                        </button>
-                      ) : null}
                     </div>
                   </div>
-                </div>
-              );
-            }}
-          </FixedSizeList>
-        )}
-      </AutoSizer>
+                );
+              }}
+            </FixedSizeList>
+          )}
+        </AutoSizer>
+      </div>
     </div>
   );
 }

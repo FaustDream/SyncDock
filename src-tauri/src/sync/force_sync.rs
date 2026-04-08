@@ -13,9 +13,69 @@ use crate::git::{classify_git_failure, inspect_repository, run_git_with_cancel};
 use crate::models::{AppSettings, NoticeLevel, RepositoryRecord, RepositoryStatus, SyncItemState, SyncTaskRecord};
 use crate::storage;
 
-use super::runtime::{ActiveTaskGuard, ActiveTaskState, SyncRuntimeState};
+use super::runtime::{clear_active_task, ActiveTaskState, SyncRuntimeState};
 use super::outcome::{build_cancelled_repo_outcome, build_repo_outcome, check_cancel_requested};
-use super::progress::{build_final_summary, build_progress_summary, emit_progress};
+use super::progress::{build_final_summary, build_progress_summary, emit_progress, push_progress_log};
+
+fn format_error_log_message(error: &AppError) -> String {
+    let detail = error
+        .detail
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| format!(" · {}", value.trim()))
+        .unwrap_or_default();
+    format!("{} [{}] {}{}", error.title, error.code, error.message, detail)
+}
+
+fn append_task_error_log(app: &AppHandle, task_id: &str, error: &AppError) {
+    let line = format!(
+        "[{}][error] {}",
+        Utc::now().to_rfc3339(),
+        format_error_log_message(error)
+    );
+    let _ = storage::append_task_log(app, task_id, &line);
+}
+
+fn should_retry_transient(settings: &AppSettings, error: &AppError) -> bool {
+    settings.auto_retry_transient_failures && error.retryable && error.code != "SD-SYNC-006"
+}
+
+fn log_repo_outcome(
+    app: &AppHandle,
+    task_id: &str,
+    repo: &RepositoryRecord,
+    shared_task: &Arc<std::sync::Mutex<SyncTaskRecord>>,
+    updated: RepositoryRecord,
+    error: AppError,
+    duration_ms: u128,
+) -> (RepositoryRecord, crate::models::SyncTaskItemResult) {
+    let level_tag = match error.level {
+        NoticeLevel::Warning => "warning",
+        NoticeLevel::Error | NoticeLevel::Fatal => "error",
+        NoticeLevel::Info => "info",
+    };
+    let message = format_error_log_message(&error);
+    let line = format!(
+        "[{}][{}][{}][{}] {}",
+        Utc::now().to_rfc3339(),
+        repo.id,
+        repo.name,
+        level_tag,
+        message
+    );
+    let _ = storage::append_task_log(app, task_id, &line);
+    let _ = storage::append_repository_log(app, &repo.id, &line);
+    push_progress_log(
+        app,
+        shared_task,
+        level_tag,
+        error.level.clone(),
+        message,
+        Some(repo.id.clone()),
+        Some(repo.name.clone()),
+    );
+    build_repo_outcome(updated, error, duration_ms, task_id)
+}
 
 /// Force synchronize repositories (ignoring local changes, using reset --hard)
 pub fn force_sync_repositories(
@@ -68,7 +128,8 @@ pub fn force_sync_repositories(
         cancelled_count: 0,
         target_repo_ids: ordered_repo_ids.clone(),
         items: Vec::new(),
-        summary_message: if target_list.is_empty() { "没有可同步的仓库。" } else { "强制同步任务已启动。" }.into(),
+        progress_logs: Vec::new(),
+        summary_message: if target_list.is_empty() { "没有可同步的仓库。" } else { "正在后台执行强制同步。" }.into(),
         log_file: paths.logs_dir.join(format!("{task_id}.log")).to_string_lossy().to_string(),
     }));
 
@@ -78,7 +139,7 @@ pub fn force_sync_repositories(
         })?;
 
         if active.is_some() {
-            return Err(AppError::new("SD-TASK-001", NoticeLevel::Warning, "任务重复提交", "当前已有同步任务在运行，未重复启动。").with_action("等待当前任务完成"));
+            return Err(AppError::new("SD-TASK-001", NoticeLevel::Warning, "已有任务正在执行", "当前已有后台任务正在执行，请等待完成后再试。").with_action("稍后重试"));
         }
 
         *active = Some(ActiveTaskState {
@@ -87,22 +148,77 @@ pub fn force_sync_repositories(
             shared_task: Arc::clone(&shared_task),
         });
     }
-    let _guard = ActiveTaskGuard { lock: &runtime.active_task };
 
-    let _ = storage::append_task_log(app, &task_id, &format!("[{}] 创建强制同步任务，目标仓库数：{}", Utc::now().to_rfc3339(), target_list.len()));
-    emit_progress(app, &shared_task, None, None);
+    let _ = storage::append_task_log(app, &task_id, &format!("[{}] task created, target repos: {}", Utc::now().to_rfc3339(), target_list.len()));
+    push_progress_log(
+        app,
+        &shared_task,
+        "task-created",
+        NoticeLevel::Info,
+        format!("Task created with {} target repositories.", target_list.len()),
+        None,
+        None,
+    );
 
+    let initial_task = {
+        let task = shared_task.lock().map_err(|_| AppError::internal("task state lock unavailable"))?;
+        task.clone()
+    };
+    persist_force_task(app, &initial_task)?;
+
+    let app_for_thread = app.clone();
+    let shared_for_thread = Arc::clone(&shared_task);
+    let task_id_for_thread = task_id.clone();
+    let active_task_lock = Arc::clone(&runtime.active_task);
+    std::thread::spawn(move || {
+        let run_result = run_force_sync_task(
+            &app_for_thread,
+            settings,
+            repositories,
+            target_list,
+            ordered_repo_ids,
+            &task_id_for_thread,
+            Arc::clone(&shared_for_thread),
+            Arc::clone(&cancel_requested),
+        );
+
+        if let Err(error) = run_result {
+            append_task_error_log(&app_for_thread, &task_id_for_thread, &error);
+            push_progress_log(&app_for_thread, &shared_for_thread, "task-error", NoticeLevel::Error, format_error_log_message(&error), None, None);
+            if let Ok(mut task) = shared_for_thread.lock() {
+                task.running = false;
+                task.end_time = Some(Utc::now().to_rfc3339());
+                task.summary_message = error.message.clone();
+                let _ = persist_force_task(&app_for_thread, &task.clone());
+            }
+        }
+        clear_active_task(&active_task_lock);
+    });
+
+    Ok(initial_task)
+}
+
+fn run_force_sync_task(
+    app: &AppHandle,
+    settings: AppSettings,
+    mut repositories: Vec<RepositoryRecord>,
+    target_list: Vec<RepositoryRecord>,
+    ordered_repo_ids: Vec<String>,
+    task_id: &str,
+    shared_task: Arc<std::sync::Mutex<SyncTaskRecord>>,
+    cancel_requested: Arc<std::sync::atomic::AtomicBool>,
+) -> AppResult<()> {
     if target_list.is_empty() {
-        let final_task = finalize_force_task(app, Arc::clone(&shared_task), &task_id)?;
+        let final_task = finalize_force_task(app, Arc::clone(&shared_task), task_id)?;
         persist_force_task(app, &final_task)?;
-        return Ok(final_task);
+        return Ok(());
     }
 
     let order_map: std::collections::HashMap<String, usize> = ordered_repo_ids.iter().enumerate().map(|(index, repo_id)| (repo_id.clone(), index)).collect();
     let settings_for_pool = settings.clone();
     let shared_for_pool = Arc::clone(&shared_task);
     let app_for_pool = app.clone();
-    let task_id_for_pool = task_id.clone();
+    let task_id_for_pool = task_id.to_string();
     let cancel_for_pool = Arc::clone(&cancel_requested);
 
     let outcomes = rayon::ThreadPoolBuilder::new()
@@ -112,9 +228,9 @@ pub fn force_sync_repositories(
         .install(|| {
             target_list.par_iter().map(|repo| {
                 let outcome = if cancel_for_pool.load(Ordering::SeqCst) {
-                    build_cancelled_repo_outcome(repo.clone(), 0, &task_id_for_pool, format!("仓库 {} 在开始前被取消。", repo.name))
+                    build_cancelled_repo_outcome(repo.clone(), 0, &task_id_for_pool, format!("Repository {} was cancelled before execution.", repo.name))
                 } else {
-                    execute_force_sync_for_repo(&app_for_pool, repo, &settings_for_pool, &task_id_for_pool, cancel_for_pool.as_ref())
+                    execute_force_sync_for_repo(&app_for_pool, repo, &settings_for_pool, &task_id_for_pool, &shared_for_pool, cancel_for_pool.as_ref())
                 };
                 {
                     if let Ok(mut task) = shared_for_pool.lock() {
@@ -142,10 +258,10 @@ pub fn force_sync_repositories(
     storage::sort_repositories(&mut repositories);
     storage::save_repositories(app, &repositories)?;
 
-    let mut final_task = finalize_force_task(app, Arc::clone(&shared_task), &task_id)?;
+    let mut final_task = finalize_force_task(app, Arc::clone(&shared_task), task_id)?;
     final_task.items.sort_by_key(|item| order_map.get(&item.repo_id).copied().unwrap_or(usize::MAX));
     persist_force_task(app, &final_task)?;
-    Ok(final_task)
+    Ok(())
 }
 
 /// Execute force sync for a single repository (using git reset --hard)
@@ -154,6 +270,7 @@ fn execute_force_sync_for_repo(
     repo: &RepositoryRecord,
     settings: &AppSettings,
     task_id: &str,
+    shared_task: &Arc<std::sync::Mutex<SyncTaskRecord>>,
     cancel_requested: &std::sync::atomic::AtomicBool,
 ) -> (RepositoryRecord, crate::models::SyncTaskItemResult) {
     use crate::models::SyncTaskItemResult;
@@ -163,14 +280,28 @@ fn execute_force_sync_for_repo(
     let mut updated = repo.clone();
 
     let log = |message: &str| {
-        let formatted = format!("[{}][{}][{}] {message}", Utc::now().to_rfc3339(), repo.id, repo.name);
+        let formatted = format!(
+            "[{}][{}][{}] {message}",
+            Utc::now().to_rfc3339(),
+            repo.id,
+            repo.name
+        );
         let _ = storage::append_task_log(app, task_id, &formatted);
         let _ = storage::append_repository_log(app, &repo.id, &formatted);
+        push_progress_log(
+            app,
+            shared_task,
+            "runtime",
+            NoticeLevel::Info,
+            message.to_string(),
+            Some(repo.id.clone()),
+            Some(repo.name.clone()),
+        );
     };
 
     if let Err(error) = check_cancel_requested(cancel_requested, format!("仓库 {} 在开始前被取消。", repo.name)) {
         log("强制同步任务已取消，跳过当前仓库。");
-        return build_repo_outcome(updated, error, started.elapsed().as_millis(), task_id);
+        return log_repo_outcome(app, task_id, repo, shared_task, updated, error, started.elapsed().as_millis());
     }
 
     log("开始强制同步。");
@@ -179,7 +310,7 @@ fn execute_force_sync_for_repo(
         Ok(inspection) => inspection,
         Err(error) => {
             updated.status = RepositoryStatus { status_text: error.message.clone(), last_checked_at: Some(Utc::now().to_rfc3339()), ..RepositoryStatus::default() };
-            return build_repo_outcome(updated, error, started.elapsed().as_millis(), task_id);
+            return log_repo_outcome(app, task_id, repo, shared_task, updated, error, started.elapsed().as_millis());
         }
     };
 
@@ -189,24 +320,48 @@ fn execute_force_sync_for_repo(
 
     // In force mode, only skip if detached head or no upstream
     if inspection.status.detached_head {
-        return build_repo_outcome(updated, AppError::new("SD-REPO-006", NoticeLevel::Warning, "当前处于 detached HEAD", "当前仓库不在正常分支上，已跳过同步。").with_action("切回分支后重试"), started.elapsed().as_millis(), task_id);
+        return log_repo_outcome(app, task_id, repo, shared_task, updated, AppError::new("SD-REPO-006", NoticeLevel::Warning, "当前处于 detached HEAD", "当前仓库不在正常分支上，已跳过同步。").with_action("切回分支后重试"), started.elapsed().as_millis());
     }
 
     if !inspection.status.upstream_configured {
-        return build_repo_outcome(updated, AppError::new("SD-REPO-003", NoticeLevel::Warning, "未配置 upstream", "当前分支未配置 upstream，已跳过同步。").with_action("手动设置 upstream 后重试"), started.elapsed().as_millis(), task_id);
+        return log_repo_outcome(app, task_id, repo, shared_task, updated, AppError::new("SD-REPO-003", NoticeLevel::Warning, "未配置 upstream", "当前分支未配置 upstream，已跳过同步。").with_action("手动设置 upstream 后重试"), started.elapsed().as_millis());
     }
 
     // Fetch
     if let Err(error) = check_cancel_requested(cancel_requested, format!("仓库 {} 在 fetch 前被取消。", repo.name)) {
         log("强制同步任务已取消，停止当前仓库处理。");
-        return build_repo_outcome(updated, error, started.elapsed().as_millis(), task_id);
+        return log_repo_outcome(app, task_id, repo, shared_task, updated, error, started.elapsed().as_millis());
     }
 
     log("执行 git fetch --all --prune。");
     match run_git_with_cancel(Some(&inspection.normalized_path), &["fetch", "--all", "--prune"], timeout, Some(cancel_requested)) {
         Ok(output) if output.success => { log(&format!("fetch 完成，耗时 {} ms。", output.duration_ms)); }
-        Ok(output) => { return build_repo_outcome(updated, classify_git_failure("fetch", &output.stderr, output.exit_code), started.elapsed().as_millis(), task_id); }
-        Err(error) => { if error.code == "SD-SYNC-006" { log("强制同步任务已取消，已终止当前 Git 命令。"); } return build_repo_outcome(updated, error, started.elapsed().as_millis(), task_id); }
+        Ok(output) => {
+            let error = classify_git_failure("fetch", &output.stderr, output.exit_code);
+            if should_retry_transient(settings, &error) {
+                log("fetch 遇到瞬时失败，正在自动重试一次。");
+                match run_git_with_cancel(Some(&inspection.normalized_path), &["fetch", "--all", "--prune"], timeout, Some(cancel_requested)) {
+                    Ok(retry_output) if retry_output.success => { log(&format!("fetch 重试成功，耗时 {} ms。", retry_output.duration_ms)); }
+                    Ok(retry_output) => { return log_repo_outcome(app, task_id, repo, shared_task, updated, classify_git_failure("fetch", &retry_output.stderr, retry_output.exit_code), started.elapsed().as_millis()); }
+                    Err(retry_error) => { return log_repo_outcome(app, task_id, repo, shared_task, updated, retry_error, started.elapsed().as_millis()); }
+                }
+            } else {
+                return log_repo_outcome(app, task_id, repo, shared_task, updated, error, started.elapsed().as_millis());
+            }
+        }
+        Err(error) => {
+            if error.code == "SD-SYNC-006" { log("强制同步任务已取消，已终止当前 Git 命令。"); }
+            if should_retry_transient(settings, &error) {
+                log("fetch 遇到瞬时失败，正在自动重试一次。");
+                match run_git_with_cancel(Some(&inspection.normalized_path), &["fetch", "--all", "--prune"], timeout, Some(cancel_requested)) {
+                    Ok(retry_output) if retry_output.success => { log(&format!("fetch 重试成功，耗时 {} ms。", retry_output.duration_ms)); }
+                    Ok(retry_output) => { return log_repo_outcome(app, task_id, repo, shared_task, updated, classify_git_failure("fetch", &retry_output.stderr, retry_output.exit_code), started.elapsed().as_millis()); }
+                    Err(retry_error) => { return log_repo_outcome(app, task_id, repo, shared_task, updated, retry_error, started.elapsed().as_millis()); }
+                }
+            } else {
+                return log_repo_outcome(app, task_id, repo, shared_task, updated, error, started.elapsed().as_millis());
+            }
+        }
     }
 
     // Get current branch
@@ -215,15 +370,39 @@ fn execute_force_sync_for_repo(
     // Reset --hard to upstream
     if let Err(error) = check_cancel_requested(cancel_requested, format!("仓库 {} 在 reset 前被取消。", repo.name)) {
         log("强制同步任务已取消，跳过 reset。");
-        return build_repo_outcome(updated, error, started.elapsed().as_millis(), task_id);
+        return log_repo_outcome(app, task_id, repo, shared_task, updated, error, started.elapsed().as_millis());
     }
 
     log(&format!("执行 git reset --hard origin/{}。", branch));
     let reset_args = format!("origin/{}", branch);
     match run_git_with_cancel(Some(&inspection.normalized_path), &["reset", "--hard", &reset_args], timeout, Some(cancel_requested)) {
         Ok(output) if output.success => { log(&format!("reset 完成，耗时 {} ms。", output.duration_ms)); }
-        Ok(output) => { return build_repo_outcome(updated, classify_git_failure("reset", &output.stderr, output.exit_code), started.elapsed().as_millis(), task_id); }
-        Err(error) => { if error.code == "SD-SYNC-006" { log("强制同步任务已取消，已终止当前 Git 命令。"); } return build_repo_outcome(updated, error, started.elapsed().as_millis(), task_id); }
+        Ok(output) => {
+            let error = classify_git_failure("reset", &output.stderr, output.exit_code);
+            if should_retry_transient(settings, &error) {
+                log("reset 遇到瞬时失败，正在自动重试一次。");
+                match run_git_with_cancel(Some(&inspection.normalized_path), &["reset", "--hard", &reset_args], timeout, Some(cancel_requested)) {
+                    Ok(retry_output) if retry_output.success => { log(&format!("reset 重试成功，耗时 {} ms。", retry_output.duration_ms)); }
+                    Ok(retry_output) => { return log_repo_outcome(app, task_id, repo, shared_task, updated, classify_git_failure("reset", &retry_output.stderr, retry_output.exit_code), started.elapsed().as_millis()); }
+                    Err(retry_error) => { return log_repo_outcome(app, task_id, repo, shared_task, updated, retry_error, started.elapsed().as_millis()); }
+                }
+            } else {
+                return log_repo_outcome(app, task_id, repo, shared_task, updated, error, started.elapsed().as_millis());
+            }
+        }
+        Err(error) => {
+            if error.code == "SD-SYNC-006" { log("强制同步任务已取消，已终止当前 Git 命令。"); }
+            if should_retry_transient(settings, &error) {
+                log("reset 遇到瞬时失败，正在自动重试一次。");
+                match run_git_with_cancel(Some(&inspection.normalized_path), &["reset", "--hard", &reset_args], timeout, Some(cancel_requested)) {
+                    Ok(retry_output) if retry_output.success => { log(&format!("reset 重试成功，耗时 {} ms。", retry_output.duration_ms)); }
+                    Ok(retry_output) => { return log_repo_outcome(app, task_id, repo, shared_task, updated, classify_git_failure("reset", &retry_output.stderr, retry_output.exit_code), started.elapsed().as_millis()); }
+                    Err(retry_error) => { return log_repo_outcome(app, task_id, repo, shared_task, updated, retry_error, started.elapsed().as_millis()); }
+                }
+            } else {
+                return log_repo_outcome(app, task_id, repo, shared_task, updated, error, started.elapsed().as_millis());
+            }
+        }
     }
 
     // Finalize

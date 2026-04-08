@@ -47,10 +47,47 @@ pub fn read_repository_log(app: &AppHandle, repo_id: &str) -> AppResult<String> 
     read_log_file(&paths.logs_dir.join(format!("repo-{}.log", repo_id)))
 }
 
+/// Read aggregated content from all repository log files
+pub fn read_all_repository_logs(app: &AppHandle) -> AppResult<String> {
+    let paths = ensure_storage(app)?;
+    let mut log_paths = fs::read_dir(&paths.logs_dir)
+        .map_err(map_log_read_error)?
+        .filter_map(|entry| entry.ok().map(|item| item.path()))
+        .filter(|path| {
+            path.is_file()
+                && path
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .map(|name| name.starts_with("repo-") && name.ends_with(".log"))
+                    .unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
+
+    log_paths.sort();
+
+    let mut contents = Vec::new();
+    for path in log_paths {
+        let content = read_log_file(&path)?;
+        if !content.trim().is_empty() {
+            contents.push(content.trim_end().to_string());
+        }
+    }
+
+    Ok(contents.join("\n"))
+}
+
 /// Export repository log to a file
 pub fn export_repository_log(app: &AppHandle, repo_id: &str, destination: &str) -> AppResult<String> {
     let target_path = super::helpers::ensure_export_file_path(destination)?;
     let content = read_repository_log(app, repo_id)?;
+    save_text_file(&target_path, &content).map_err(map_log_export_error)?;
+    Ok(target_path.to_string_lossy().to_string())
+}
+
+/// Export aggregated repository logs to a file
+pub fn export_all_repository_logs(app: &AppHandle, destination: &str) -> AppResult<String> {
+    let target_path = super::helpers::ensure_export_file_path(destination)?;
+    let content = read_all_repository_logs(app)?;
     save_text_file(&target_path, &content).map_err(map_log_export_error)?;
     Ok(target_path.to_string_lossy().to_string())
 }

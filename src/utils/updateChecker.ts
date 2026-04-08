@@ -1,3 +1,4 @@
+// 作者：凌致
 import { invoke } from "@tauri-apps/api/tauri";
 import tauriConfig from "../../src-tauri/tauri.conf.json";
 
@@ -23,7 +24,7 @@ export interface GitHubRelease {
 
 const GITHUB_REPO_OWNER = "FaustDream";
 const GITHUB_REPO_NAME = "SyncDock";
-const DEFAULT_VERSION = "1.0.0";
+const DEFAULT_VERSION = "2.0.0";
 const GITHUB_RELEASES_PAGE = `https://github.com/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/releases`;
 const GITHUB_LATEST_RELEASE_PAGE = `${GITHUB_RELEASES_PAGE}/latest`;
 

@@ -1,4 +1,4 @@
-import type { AppSettings, RepositoryOwnership, RepositoryRecord, RepoTone, ScannedRepository } from "../types";
+import type { AppSettings, RepositoryOwnership, RepositoryRecord, RepoTone } from "../types";
 
 const OWNERSHIP_LABELS: Record<RepositoryOwnership, string> = {
   mine: "我的",
@@ -6,9 +6,6 @@ const OWNERSHIP_LABELS: Record<RepositoryOwnership, string> = {
   unassigned: "未标注"
 };
 
-/**
- * 获取仓库状态元数据
- */
 export function getRepositoryMeta(repo: RepositoryRecord, settings: AppSettings): { tone: RepoTone; label: string } {
   if (!repo.enabled) {
     return { tone: "neutral", label: "已禁用" };
@@ -30,7 +27,7 @@ export function getRepositoryMeta(repo: RepositoryRecord, settings: AppSettings)
     return { tone: "warning", label: "本地有改动" };
   }
   if (settings.skipUntrackedFiles && repo.status.hasUntrackedFiles) {
-    return { tone: "warning", label: "未跟踪文件" };
+    return { tone: "warning", label: "存在未跟踪文件" };
   }
   if (!repo.status.upstreamConfigured) {
     return { tone: "warning", label: "未配置 upstream" };
@@ -73,9 +70,8 @@ export function getRepositoryOwnershipTone(ownership: RepositoryOwnership): Repo
   return "neutral";
 }
 
-/**
- * 检查仓库是否匹配总览状态过滤器
- */
+export type OverviewStatusFilter = "all" | "success" | "failed" | "warning" | "pending";
+
 export function matchesOverviewStatusFilter(
   repo: RepositoryRecord,
   filter: OverviewStatusFilter,
@@ -101,18 +97,10 @@ export function matchesOverviewStatusFilter(
   return true;
 }
 
-export type OverviewStatusFilter = "all" | "success" | "failed" | "warning" | "pending";
-
-/**
- * 仓库列表排序（按名称）
- */
 export function sortRepositories(repositories: RepositoryRecord[]): RepositoryRecord[] {
   return [...repositories].sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
 }
 
-/**
- * 状态优先级：danger > warning > pending > success > neutral
- */
 const TONE_PRIORITY: Record<RepoTone, number> = {
   danger: 0,
   warning: 1,
@@ -121,9 +109,6 @@ const TONE_PRIORITY: Record<RepoTone, number> = {
   neutral: 4
 };
 
-/**
- * 仓库列表排序（按状态优先级，有问题的在上面）
- */
 export function sortRepositoriesByStatus(
   repositories: RepositoryRecord[],
   settings: AppSettings
@@ -136,24 +121,4 @@ export function sortRepositoriesByStatus(
     if (priorityA !== priorityB) return priorityA - priorityB;
     return a.name.localeCompare(b.name, "zh-CN");
   });
-}
-
-/**
- * 规范化扫描结果中的仓库数据
- */
-export function normalizeScannedRepositories(repositories: ScannedRepository[]): ScannedRepository[] {
-  return repositories.map((repo) => ({
-    ...repo,
-    name: repo.name.trim() || getPathLeafName(repo.path),
-    group: repo.group.trim() || "未分组",
-    ownership: repo.ownership || "unassigned"
-  }));
-}
-
-/**
- * 从路径中提取末尾名称
- */
-export function getPathLeafName(path: string): string {
-  const parts = path.split(/[\\/]/).filter(Boolean);
-  return parts[parts.length - 1] || "未命名仓库";
 }

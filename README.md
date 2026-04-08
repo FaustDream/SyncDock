@@ -1,257 +1,117 @@
-# SyncDock / 同步坞
+# SyncDock 2.0.0
 
-<div align="center">
+SyncDock 是一款面向多 Git 仓库场景的桌面同步工作台，帮助开发者在一个界面内完成仓库状态查看、后台同步、任务追踪、日志排查和配置迁移。
 
-**多 Git 仓库一键同步工作台**
+## 当前版本
 
-*A calm desktop hub for multi-repository sync*
+- 版本：`2.0.0`
+- 桌面框架：`Tauri 1.x`
+- 前端：`React 18 + TypeScript + Vite`
+- 后端：`Rust`
+- 当前交付平台：`Windows`
 
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Tauri](https://img.shields.io/badge/Tauri-1.8-9cf.svg)](https://tauri.app/)
-[![React](https://img.shields.io/badge/React-18.3-61dafb.svg)](https://reactjs.org/)
-[![Rust](https://img.shields.io/badge/Rust-1.77+-orange.svg)](https://www.rust-lang.org/)
+## 核心能力
 
-</div>
+- 多仓库统一管理
+- 仓库分组与归属管理
+- 后台刷新状态
+- 后台同步、分组同步、单仓库同步、强制同步
+- 任务进度条与阶段日志
+- 仓库日志中心与任务日志中心
+- 错误码透出与故障排查
+- 仓库配置导入导出
 
----
+## 2.0.0 重点更新
 
-## 📖 项目简介
+- 所有同步与刷新操作改为后台执行，避免界面卡住
+- 任务概览新增今日任务分组与当前任务进度展示
+- 仓库详情页重排为顶部操作区 + 双栏正文 + 底部日志
+- 仓库日志默认显示全部日志，选中仓库后切换单仓库视角
+- 日志中的 warning/error 增加错误码展示
+- 设置页重构，补齐路径与目录、关于页与 2.0.0 发布信息
+- 新增 `docs/v2.0.0` 全套交付文档
 
-**同步坞（SyncDock）** 是一款面向个人开发者的桌面端多 Git 仓库同步工具。
+## 页面结构
 
-### 核心价值
+- 总览：查看仓库状态、最近任务、待处理项
+- 仓库：
+  - 工作区
+  - 清单
+  - 日志
+- 任务：
+  - 概览
+  - 历史任务
+  - 日志中心
+- 设置：
+  - 常规
+  - 同步
+  - 路径与目录
+  - 关于
 
-- 🎯 **一键同步** - 批量同步多个 Git 仓库，告别逐个手动 pull
-- 🛡️ **稳定优先** - 采用保守策略，默认保护本地工作区不被破坏
-- 📊 **统一视图** - 集中查看所有仓库状态，一目了然
-- 🔍 **可解释性** - 每个同步结果都有明确说明，知道为什么成功、失败或跳过
+## 开发环境
 
-### 适用场景
+- Node.js 18+
+- Rust 1.77+
+- Windows 10/11
+- Microsoft Edge WebView2 Runtime
 
-- 多设备办公，需要在设备间同步多个仓库
-- 维护大量分散的代码、文档、配置仓库
-- 希望降低日常同步操作成本的开发者
-- 需要统一管理多个独立 Git 仓库的用户
+## 本地运行
 
----
-
-## ✨ 主要功能
-
-### 📦 仓库管理
-
-- 扫描本地目录，自动识别 Git 仓库
-- 手动添加单个仓库
-- 仓库分组管理
-- 启用/禁用仓库
-- 编辑仓库名称、备注、分组
-
-### 🔄 同步功能
-
-- 一键同步全部仓库
-- 按分组同步
-- 选中仓库批量同步
-- 单仓库单独同步
-- 实时进度展示
-
-### 📈 状态监控
-
-- 当前分支显示
-- ahead/behind 提交数
-- 工作区状态检测
-- 最近同步结果
-- 同步时间记录
-
-### 📝 日志追踪
-
-- 同步任务历史记录
-- 每仓库详细结果
-- 错误摘要查看
-- 日志导出功能
-- 日志自动清理
-
-### ⚙️ 配置管理
-
-- 自定义同步策略
-- 并发数、超时设置
-- 配置导入导出
-- 跨设备迁移支持
-- 路径前缀替换
-
----
-
-## 🚀 快速开始
-
-### 前置要求
-
-- **Git**: 版本 2.0 或更高
-- **Node.js**: 版本 16 或更高（仅开发时需要）
-- **Rust**: 版本 1.77 或更高（仅开发时需要）
-
-### 从源码构建
-
-#### 1. 克隆仓库
-
-```bash
-git clone https://github.com/your-username/SyncDock.git
-cd SyncDock
-```
-
-#### 2. 安装依赖
-
-```bash
-# 安装 Node.js 依赖
+```powershell
 npm install
-```
-
-#### 3. 开发模式运行
-
-```bash
-# 启动开发服务器
 npm run tauri dev
 ```
 
-#### 4. 构建生产版本
+## 生产构建
 
-```bash
-# 构建桌面应用
+```powershell
 npm run tauri build
 ```
 
-构建完成后，安装包位于 `src-tauri/target/release/bundle/` 目录。
+## 发布构建
 
-### 直接下载
-
-访问 [Releases](https://github.com/your-username/SyncDock/releases) 页面下载最新版本安装包。
-
----
-
-## 📚 文档导航
-
-完整文档位于 [`docs/`](./docs/) 目录：
-
-### 核心文档
-
-- [文档目录](./docs/00-文档目录.md) - 完整文档索引
-- [项目总览](./docs/01-项目总览.md) - 项目定位与价值
-- [需求文档 PRD](./docs/02-项目需求文档-PRD.md) - 产品需求定义
-
-### 设计文档
-
-- [技术路线方案](./docs/03-技术路线方案.md) - 技术栈与架构设计
-- [功能模块清单](./docs/04-功能模块清单.md) - 功能拆解与优先级
-- [稳定性与同步策略](./docs/05-稳定性与同步策略设计.md) - 核心同步策略
-- [界面风格与交互规范](./docs/06-界面风格与交互规范.md) - UI/UX 设计规范
-
-### 运维文档
-
-- [边界问题与异常场景](./docs/07-边界问题与异常场景处理清单.md) - 边界场景处理
-- [常见 Bug 风险与排查](./docs/08-常见Bug风险与排查清单.md) - 问题排查指南
-- [错误码与提示文案](./docs/09-错误码与提示文案规范.md) - 错误码规范
-
-### 用户手册
-
-- [用户使用手册（中文）](./docs/10-用户使用手册-中文.md) - 中文使用指南
-- [用户使用手册（英文）](./docs/11-用户使用手册-英文.md) - English User Guide
-- [故障排查指南](./docs/12-故障排查指南.md) - 常见问题解决方案
-
-### 开发文档
-
-- [开发者指南](./docs/13-开发者指南.md) - 开发环境与贡献指南
-- [现有完整功能文档](./docs/14-现有完整功能文档.md) - 功能详细说明
-
----
-
-## 🗂️ 日志位置
-
-### Windows
-
-```
-C:\Users\<用户名>\AppData\Roaming\com.syncdock.desktop\logs\
+```powershell
+.\build-release.bat
 ```
 
-### macOS
+构建完成后可得到：
 
-```
-~/Library/Application Support/com.syncdock.desktop/logs/
-```
+- Windows 安装版
+- Windows 免安装版压缩包
 
-### Linux
+发布说明见：
 
-```
-~/.config/com.syncdock.desktop/logs/
-```
+- [BUILD.md](./BUILD.md)
+- [RELEASE_GUIDE.md](./RELEASE_GUIDE.md)
 
-### 日志文件说明
+## 文档导航
 
-- `task_YYYYMMDD_HHMMSS.log` - 同步任务日志
-- `app.log` - 应用运行日志
-- 日志自动清理周期可在设置中配置（默认 30 天）
+2.0.0 文档位于：
 
----
+- [docs/v2.0.0/00-文档目录.md](./docs/v2.0.0/00-文档目录.md)
 
-## 🛠️ 技术栈
+重点文档：
 
-### 前端
+- [项目总览](./docs/v2.0.0/01-项目总览.md)
+- [项目需求文档 PRD](./docs/v2.0.0/02-项目需求文档-PRD.md)
+- [技术路线方案](./docs/v2.0.0/03-技术路线方案.md)
+- [总览与仓库页面说明](./docs/v2.0.0/04-功能与页面使用说明-总览与仓库.md)
+- [任务与设置页面说明](./docs/v2.0.0/05-功能与页面使用说明-任务与设置.md)
+- [边界问题与异常场景处理清单](./docs/v2.0.0/07-边界问题与异常场景处理清单.md)
+- [常见 Bug 风险与排除清单](./docs/v2.0.0/08-常见Bug风险与排除清单.md)
+- [错误码与提示文案规范](./docs/v2.0.0/09-错误码与提示文案规范.md)
+- [故障排查指南](./docs/v2.0.0/12-故障排查指南.md)
 
-- **React 18** - UI 框架
-- **TypeScript** - 类型安全
-- **Vite** - 构建工具
+## 目录说明
 
-### 后端
+- `src/`：前端页面、组件、状态与工具
+- `src-tauri/`：Rust 后端、Tauri 命令、存储与同步逻辑
+- `docs/`：版本化文档
+- `Releases/`：本地发布产物目录
 
-- **Tauri 1.8** - 桌面应用框架
-- **Rust** - 后端逻辑
-- **Serde** - 序列化框架
+说明：`Releases/` 已加入 `.gitignore`，不会提交到仓库。
 
-### 核心依赖
+## 许可证
 
-- **chrono** - 时间处理
-- **rayon** - 并行计算
-- **walkdir** - 目录遍历
+MIT
 
----
-
-## 🤝 贡献指南
-
-我们欢迎所有形式的贡献！
-
-### 如何贡献
-
-1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 提交 Pull Request
-
-### 开发指南
-
-详细开发指南请参考 [开发者指南](./docs/13-开发者指南.md)。
-
----
-
-## 📄 许可证
-
-本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件。
-
----
-
-## 🙏 致谢
-
-感谢所有为这个项目做出贡献的开发者！
-
----
-
-## 📮 联系方式
-
-- 提交 Issue: [GitHub Issues](https://github.com/your-username/SyncDock/issues)
-- 功能建议: [GitHub Discussions](https://github.com/your-username/SyncDock/discussions)
-
----
-
-<div align="center">
-
-**同步坞 - 让多仓库同步变得简单而稳定**
-
-Made with ❤️ by SyncDock Team
-
-</div>

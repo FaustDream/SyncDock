@@ -72,6 +72,15 @@ export interface SyncTaskItemResult {
   finishedAt: string;
 }
 
+export interface SyncTaskProgressLog {
+  at: string;
+  level: NoticeLevel;
+  phase: string;
+  message: string;
+  repoId?: string | null;
+  repoName?: string | null;
+}
+
 export interface SyncTaskRecord {
   taskId: string;
   createdAt: string;
@@ -89,6 +98,7 @@ export interface SyncTaskRecord {
   cancelledCount: number;
   targetRepoIds: string[];
   items: SyncTaskItemResult[];
+  progressLogs: SyncTaskProgressLog[];
   summaryMessage: string;
   logFile: string;
 }
@@ -105,13 +115,11 @@ export interface GitEnvironment {
 export interface AppSettings {
   concurrentLimit: number;
   commandTimeoutSecs: number;
+  autoRetryTransientFailures: boolean;
   skipUntrackedFiles: boolean;
   showDebugLogs: boolean;
   logRetentionDays: number;
   logsDirectory?: string | null;
-  defaultScanRoot?: string | null;
-  ignoredDirectories: string[];
-  scanDepth: number;
   defaultView: PreferredView;
   themeMode: ThemeMode;
   languageMode: LanguageMode;
@@ -199,17 +207,6 @@ export interface ConfigImportResult {
 }
 
 
-export interface ScannedRepository {
-  path: string;
-  name: string;
-  currentBranch: string;
-  remoteUrl?: string | null;
-  group: string;
-  ownership: RepositoryOwnership;
-  status: string;
-  selected: boolean;
-}
-
 export interface RepositoryDraftInput {
   path: string;
   name?: string | null;
@@ -228,11 +225,6 @@ export interface RepositoryUpdateInput {
   enabled: boolean;
 }
 
-
-export interface ScanRequest {
-  rootPath: string;
-  maxDepth?: number | null;
-}
 
 export interface CloneRepositoryRequest {
   remoteUrl: string;

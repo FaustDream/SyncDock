@@ -6,12 +6,12 @@ use crate::models::SyncTaskRecord;
 
 /// Runtime state container for sync operations
 pub struct SyncRuntimeState {
-    pub(crate) active_task: Mutex<Option<ActiveTaskState>>,
+    pub(crate) active_task: Arc<Mutex<Option<ActiveTaskState>>>,
 }
 
 impl Default for SyncRuntimeState {
     fn default() -> Self {
-        Self { active_task: Mutex::new(None) }
+        Self { active_task: Arc::new(Mutex::new(None)) }
     }
 }
 
@@ -22,15 +22,8 @@ pub struct ActiveTaskState {
     pub shared_task: Arc<Mutex<SyncTaskRecord>>,
 }
 
-/// Guard that clears active task on drop
-pub struct ActiveTaskGuard<'a> {
-    pub lock: &'a Mutex<Option<ActiveTaskState>>,
-}
-
-impl Drop for ActiveTaskGuard<'_> {
-    fn drop(&mut self) {
-        if let Ok(mut active) = self.lock.lock() {
-            *active = None;
-        }
+pub fn clear_active_task(lock: &Arc<Mutex<Option<ActiveTaskState>>>) {
+    if let Ok(mut active) = lock.lock() {
+        *active = None;
     }
 }

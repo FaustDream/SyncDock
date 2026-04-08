@@ -150,6 +150,17 @@ pub struct SyncTaskItemResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SyncTaskProgressLog {
+    pub at: String,
+    pub level: NoticeLevel,
+    pub phase: String,
+    pub message: String,
+    pub repo_id: Option<String>,
+    pub repo_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SyncTaskRecord {
     pub task_id: String,
     pub created_at: String,
@@ -170,6 +181,8 @@ pub struct SyncTaskRecord {
     pub cancelled_count: usize,
     pub target_repo_ids: Vec<String>,
     pub items: Vec<SyncTaskItemResult>,
+    #[serde(default)]
+    pub progress_logs: Vec<SyncTaskProgressLog>,
     pub summary_message: String,
     pub log_file: String,
 }
@@ -190,13 +203,12 @@ pub struct GitEnvironment {
 pub struct AppSettings {
     pub concurrent_limit: usize,
     pub command_timeout_secs: u64,
+    #[serde(default = "default_auto_retry_transient_failures")]
+    pub auto_retry_transient_failures: bool,
     pub skip_untracked_files: bool,
     pub show_debug_logs: bool,
     pub log_retention_days: u32,
     pub logs_directory: Option<String>,
-    pub default_scan_root: Option<String>,
-    pub ignored_directories: Vec<String>,
-    pub scan_depth: usize,
     pub default_view: String,
     pub theme_mode: String,
     pub language_mode: String,
@@ -211,26 +223,21 @@ impl Default for AppSettings {
         Self {
             concurrent_limit: 3,
             command_timeout_secs: 45,
+            auto_retry_transient_failures: default_auto_retry_transient_failures(),
             skip_untracked_files: false,
             show_debug_logs: true,
             log_retention_days: 30,
             logs_directory: None,
-
-            default_scan_root: None,
-            ignored_directories: vec![
-                ".git".into(),
-                "node_modules".into(),
-                "target".into(),
-                "dist".into(),
-                "build".into(),
-            ],
-            scan_depth: 4,
             default_view: "overview".into(),
             theme_mode: "system".into(),
             language_mode: "zh-CN".into(),
             sync_mode: SyncMode::default(),
         }
     }
+}
+
+fn default_auto_retry_transient_failures() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -345,19 +352,6 @@ pub struct ConfigTransferBundle {
     pub tasks: Vec<SyncTaskRecord>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ScannedRepository {
-    pub path: String,
-    pub name: String,
-    pub current_branch: String,
-    pub remote_url: Option<String>,
-    pub group: String,
-    #[serde(default)]
-    pub ownership: RepositoryOwnership,
-    pub status: String,
-    pub selected: bool,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -382,12 +376,6 @@ pub struct RepositoryUpdateInput {
 }
 
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ScanRequest {
-    pub root_path: String,
-    pub max_depth: Option<usize>,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

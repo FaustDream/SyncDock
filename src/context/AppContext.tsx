@@ -13,19 +13,18 @@ import type {
   SyncProgressEvent,
   SyncTaskRecord,
   CloneRepositoryRequest,
-  RepositoryDraftInput,
-  ScannedRepository
+  RepositoryDraftInput
 } from "../types";
 import { getRepositoryMeta } from "../utils/repoHelpers";
 import { getImportStrategyLabel } from "../utils/importHelpers";
 import { formatBytes, formatDateKey } from "../utils/formatters";
-import { normalizeLanguageMode, normalizePreferredView, normalizeThemeMode, mergeTasks, sortRepositories, normalizeScannedRepositories, getPathLeafName } from "../utils";
+import { normalizeLanguageMode, normalizePreferredView, normalizeThemeMode, mergeTasks, sortRepositories } from "../utils";
 
 // Context types
 export type ViewKey = "overview" | "repositories" | "tasks" | "settings";
 export type OverviewTab = "status" | "summary";
 export type RepositoryTab = "workspace" | "list" | "logs";
-export type SettingsTab = "general" | "sync" | "paths" | "repositories" | "about";
+export type SettingsTab = "general" | "sync" | "paths" | "about";
 export type TaskTab = "overview" | "history" | "detail" | "repoResults" | "logs";
 export type RepoTone = "neutral" | "success" | "pending" | "warning" | "danger";
 export type LogLevelFilter = "all" | "warning" | "error";
@@ -50,13 +49,11 @@ export type NavigationMode = "push" | "replace";
 const defaultSettings: AppSettings = {
   concurrentLimit: 3,
   commandTimeoutSecs: 45,
+  autoRetryTransientFailures: true,
   skipUntrackedFiles: false,
   showDebugLogs: true,
   logRetentionDays: 30,
   logsDirectory: "",
-  defaultScanRoot: "",
-  ignoredDirectories: [".git", "node_modules", "target", "dist", "build"],
-  scanDepth: 4,
   defaultView: "overview",
   themeMode: "system",
   languageMode: "zh-CN"
@@ -170,9 +167,7 @@ interface AppContextValue {
   showNotice: (type: "success" | "warning" | "error", text: string) => void;
   showErrorNotice: (parsed: { title: string; message: string; code?: string; detail?: string; action?: string; retryable?: boolean }) => void;
 
-  // Modal state
-  scanModalOpen: boolean;
-  setScanModalOpen: (open: boolean) => void;
+  // Modal state
   addModalOpen: boolean;
   setAddModalOpen: (open: boolean) => void;
   cloneModalOpen: boolean;
@@ -186,13 +181,7 @@ interface AppContextValue {
   draftRepo: RepositoryDraftInput;
   setDraftRepo: (draft: RepositoryDraftInput) => void;
   cloneDraft: CloneRepositoryRequest;
-  setCloneDraft: (draft: CloneRepositoryRequest) => void;
-  scanRootPath: string;
-  setScanRootPath: (path: string) => void;
-  scanDepth: number;
-  setScanDepth: (depth: number) => void;
-  scanResults: ScannedRepository[];
-  setScanResults: (results: ScannedRepository[]) => void;
+  setCloneDraft: (draft: CloneRepositoryRequest) => void;
 
   // Import state
   importSourcePath: string;
@@ -235,9 +224,7 @@ interface AppContextValue {
   handleExportRepositoryLog: () => Promise<void>;
   handleExportConfig: () => Promise<void>;
   handleSelectImportConfig: () => Promise<void>;
-  handleImportConfig: () => Promise<void>;
-  handleScanRepositories: () => Promise<void>;
-  handleImportScannedRepositories: () => Promise<void>;
+  handleImportConfig: () => Promise<void>;
   handleAddRepository: () => Promise<void>;
   handleCloneRepository: () => Promise<void>;
   handleSaveRepository: () => Promise<void>;
@@ -245,8 +232,7 @@ interface AppContextValue {
   pickFolder: (setter: (value: string) => void) => Promise<void>;
   copyText: (value: string, successText: string) => Promise<void>;
   toggleRepoSelection: (repoId: string) => void;
-  toggleSelectAllVisible: () => void;
-  updateScanResult: (index: number, updater: (repo: ScannedRepository) => ScannedRepository) => void;
+  toggleSelectAllVisible: () => void;
   handleChangeConfigDirectory: () => Promise<void>;
   handleResetConfigDirectory: () => Promise<void>;
   handleResetLogsDirectory: () => void;
@@ -323,6 +309,12 @@ function getInitialRepoDetailRoute(): RepoDetailRouteState | null {
   return route?.kind === "repo-detail" ? route : null;
 }
 
+function getTodayDateInputValue(): string {
+  const now = new Date();
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
+}
+
 // Provider component
 export function AppProvider({ children }: { children: ReactNode }) {
   // View state
@@ -372,13 +364,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [groupFilter, setGroupFilter] = useState("all");
   const [taskSearch, setTaskSearch] = useState("");
   const [taskResultFilter, setTaskResultFilter] = useState<TaskResultFilter>("all");
-  const [taskDateFilter, setTaskDateFilter] = useState("");
+  const [taskDateFilter, setTaskDateFilter] = useState(() => getTodayDateInputValue());
 
   // Notice state
   const [notice, setNotice] = useState<NoticeState | null>(null);
 
-  // Modal state
-  const [scanModalOpen, setScanModalOpen] = useState(false);
+  // Modal state
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [cloneModalOpen, setCloneModalOpen] = useState(false);
   const [taskDetailModalOpen, setTaskDetailModalOpen] = useState(false);
@@ -390,10 +381,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   });
   const [cloneDraft, setCloneDraft] = useState<CloneRepositoryRequest>({
     remoteUrl: "", destinationParent: "", directoryName: "", group: "未分组", ownership: "unassigned", note: ""
-  });
-  const [scanRootPath, setScanRootPath] = useState("");
-  const [scanDepth, setScanDepth] = useState(4);
-  const [scanResults, setScanResults] = useState<ScannedRepository[]>([]);
+  });
 
   // Import state
   const [importSourcePath, setImportSourcePath] = useState("");
@@ -517,8 +505,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSettings(snapshot.settings);
     setConfigDirectory(snapshot.configDirectory);
     setLogsDirectory(snapshot.logsDirectory);
-    setScanRootPath(snapshot.settings.defaultScanRoot ?? "");
-    setScanDepth(snapshot.settings.scanDepth);
 
     if (applyPreferredView && !repoDetailOpen) {
       const nextView = normalizePreferredView(snapshot.settings.defaultView);
@@ -593,11 +579,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Main actions
   const handleRefresh = useCallback(async (repoIds?: string[]) => {
     await runAction("refresh", async () => {
-      const refreshed = await api.refreshRepositories(repoIds);
-      setRepositories(refreshed);
-      showNotice("success", "状态已刷新");
+      const task = await api.refreshRepositoriesInBackground(repoIds);
+      setSyncTask(task);
+      setTasks((current) => mergeTasks(current, task));
+      setSelectedTaskId(task.taskId);
+      showNotice("success", "刷新任务已在后台启动");
     }).catch(handleError);
-  }, [runAction, handleError, showNotice]);
+  }, [runAction, handleError, showNotice, setTasks]);
 
   const handleSync = useCallback(async (repoIds?: string[], group?: string) => {
     await runAction("sync", async () => {
@@ -664,8 +652,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const nextSettings: AppSettings = {
         ...settings,
         logsDirectory: settings.logsDirectory?.trim() || null,
-        defaultScanRoot: settings.defaultScanRoot?.trim() || null,
-        ignoredDirectories: settings.ignoredDirectories.filter(Boolean).map((item) => item.trim()).filter(Boolean),
         defaultView: normalizePreferredView(settings.defaultView),
         themeMode: normalizeThemeMode(settings.themeMode),
         languageMode: normalizeLanguageMode(settings.languageMode)
@@ -699,15 +685,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [selectedTask, runAction, showNotice, handleError]);
 
   const handleExportRepositoryLog = useCallback(async () => {
-    if (!selectedRepo) {
-      showNotice("warning", "请先选择一个仓库");
-      return;
-    }
     await runAction("export-repo-log", async () => {
-      const path = await api.pickSaveFile(`${selectedRepo.id}.log`);
+      const defaultName = selectedRepo ? `${selectedRepo.id}.log` : "all-repositories.log";
+      const path = await api.pickSaveFile(defaultName);
       if (!path) return;
-      const savedPath = await api.exportRepositoryLog(selectedRepo.id, path);
-      showNotice("success", `仓库日志已导出到 ${savedPath}`);
+      const savedPath = selectedRepo
+        ? await api.exportRepositoryLog(selectedRepo.id, path)
+        : await api.exportAllRepositoryLogs(path);
+      showNotice("success", `${selectedRepo ? "仓库" : "聚合"}日志已导出到 ${savedPath}`);
     }).catch(handleError);
   }, [selectedRepo, runAction, showNotice, handleError]);
 
@@ -782,45 +767,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }).catch(handleError);
   }, [importSourcePath, importPreview, importStrategy, importSkipConflicts, importPathReplacements, runAction, refreshWorkspaceState, showNotice, handleError]);
 
-  // Scan functions
-  const handleScanRepositories = useCallback(async () => {
-    if (!scanRootPath.trim()) {
-      showNotice("warning", "请先选择扫描目录");
-      return;
-    }
-    await runAction("scan", async () => {
-      const result = await api.scanRepositories({ rootPath: scanRootPath, maxDepth: scanDepth });
-      setScanResults(normalizeScannedRepositories(result));
-      showNotice("success", `扫描完成，共发现 ${result.length} 个仓库候选项`);
-    }).catch(handleError);
-  }, [scanRootPath, scanDepth, runAction, showNotice, handleError]);
-
-  const handleImportScannedRepositories = useCallback(async () => {
-    const selected = scanResults
-      .filter((repo) => repo.selected)
-      .map((repo) => ({
-        ...repo,
-        name: repo.name.trim() || getPathLeafName(repo.path),
-        group: repo.group.trim() || "未分组",
-        ownership: repo.ownership || "unassigned"
-      }));
-    if (!selected.length) {
-      showNotice("warning", "请至少选择一个仓库");
-      return;
-    }
-    await runAction("import", async () => {
-      const imported = await api.importScannedRepositories(selected);
-      setRepositories((current) => sortRepositories([...current, ...imported]));
-      setScanModalOpen(false);
-      setScanResults([]);
-      showNotice("success", `已导入 ${imported.length} 个仓库`);
-      await refreshWorkspaceState(false);
-    }).catch(handleError);
-  }, [scanResults, runAction, showNotice, refreshWorkspaceState, handleError]);
-
-  const updateScanResult = useCallback((index: number, updater: (repo: ScannedRepository) => ScannedRepository) => {
-    setScanResults((current) => current.map((repo, currentIndex) => (currentIndex === index ? updater(repo) : repo)));
-  }, []);
 
   // Repository functions
   const handleAddRepository = useCallback(async () => {
@@ -1018,8 +964,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     showNotice,
     showErrorNotice,
 
-    // Modal state
-    scanModalOpen, setScanModalOpen,
+    // Modal state
     addModalOpen, setAddModalOpen,
     cloneModalOpen, setCloneModalOpen,
     taskDetailModalOpen, setTaskDetailModalOpen,
@@ -1027,10 +972,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     // Draft state
     draftRepo, setDraftRepo,
-    cloneDraft, setCloneDraft,
-    scanRootPath, setScanRootPath,
-    scanDepth, setScanDepth,
-    scanResults, setScanResults,
+    cloneDraft, setCloneDraft,
 
     // Import state
     importSourcePath, setImportSourcePath,
@@ -1067,9 +1009,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     handleExportRepositoryLog,
     handleExportConfig,
     handleSelectImportConfig,
-    handleImportConfig,
-    handleScanRepositories,
-    handleImportScannedRepositories,
+    handleImportConfig,
     handleAddRepository,
     handleCloneRepository,
     handleSaveRepository,
@@ -1077,8 +1017,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     pickFolder,
     copyText,
     toggleRepoSelection,
-    toggleSelectAllVisible,
-    updateScanResult,
+    toggleSelectAllVisible,
     handleChangeConfigDirectory,
     handleResetConfigDirectory,
     handleResetLogsDirectory,
@@ -1093,8 +1032,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     taskLog, repositoryLog, repoLogSearch, repoLogLevelFilter, taskLogSearch, taskLogLevelFilter,
     search, statusFilter, groupFilter, taskSearch, taskResultFilter, taskDateFilter,
     notice,
-    scanModalOpen, addModalOpen, cloneModalOpen, taskDetailModalOpen, importModalOpen,
-    draftRepo, cloneDraft, scanRootPath, scanDepth, scanResults,
+    addModalOpen, cloneModalOpen, taskDetailModalOpen, importModalOpen,
+    draftRepo, cloneDraft,
     importSourcePath, importPreview, importResult, importStrategy, importSkipConflicts, importPathReplacements,
     groups, languageMode, activeTask, selectedRepo, selectedTask,
     pendingCount, successCount, failedCount, warningCount, enabledCount, syncProgress, latestTask,
@@ -1102,9 +1041,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     showNotice, showErrorNotice,
     refreshWorkspaceState, handleRefresh, handleSync, handleForceSync, handleCancelTask,
     handleSaveSettings, handleCleanupLogs, handleExportTaskLog, handleExportRepositoryLog, handleExportConfig,
-    handleSelectImportConfig, handleImportConfig, handleScanRepositories, handleImportScannedRepositories,
+    handleSelectImportConfig, handleImportConfig,
     handleAddRepository, handleCloneRepository, handleSaveRepository, handleRemoveRepository,
-    pickFolder, copyText, toggleRepoSelection, toggleSelectAllVisible, updateScanResult,
+    pickFolder, copyText, toggleRepoSelection, toggleSelectAllVisible,
     handleChangeConfigDirectory, handleResetConfigDirectory, handleResetLogsDirectory,
     closeImportModal, openTaskDetail
   ]);

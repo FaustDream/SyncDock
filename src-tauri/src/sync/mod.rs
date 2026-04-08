@@ -12,10 +12,12 @@ mod progress;
 mod outcome;
 mod sync;
 mod force_sync;
+mod refresh;
 
 pub use runtime::SyncRuntimeState;
 pub use sync::sync_repositories;
 pub use force_sync::force_sync_repositories;
+pub use refresh::refresh_repositories;
 
 use std::sync::Arc;
 use tauri::AppHandle;
@@ -24,7 +26,7 @@ use crate::errors::{AppError, AppResult};
 use crate::models::NoticeLevel;
 use crate::storage;
 
-/// Cancel the currently running sync task
+/// Cancel the currently running background task
 pub fn cancel_sync_task(app: &AppHandle, runtime: &SyncRuntimeState) -> AppResult<Option<String>> {
     let (task_id, shared_task) = {
         let active = runtime.active_task.lock().map_err(|_| {

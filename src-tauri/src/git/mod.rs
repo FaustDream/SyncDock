@@ -1,6 +1,5 @@
 //! Git module - handles all Git command execution and repository inspection
 
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -8,10 +7,11 @@ use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use wait_timeout::ChildExt;
-use walkdir::{DirEntry, WalkDir};
 
 use crate::errors::{AppError, AppResult};
-use crate::models::{AppSettings, GitEnvironment, NoticeLevel, RepositoryStatus, ScannedRepository};
+use crate::models::{
+    AppSettings, GitEnvironment, NoticeLevel, RepositoryStatus,
+};
 
 /// Command output structure
 #[derive(Debug, Clone)]
@@ -79,7 +79,8 @@ pub fn classify_git_failure(command: &str, stderr: &str, exit_code: i32) -> AppE
             "网络连接失败",
             "无法连接到远程仓库，请检查网络连接。",
         )
-        .with_action("检查网络连接");
+        .with_action("检查网络连接")
+        .retryable(true);
     }
 
     // Merge conflicts
@@ -151,7 +152,8 @@ pub fn classify_git_failure(command: &str, stderr: &str, exit_code: i32) -> AppE
             "Git 锁文件冲突",
             "另一个 Git 操作正在进行或锁文件未清理。",
         )
-        .with_action("等待或手动删除锁文件");
+        .with_action("等待或手动删除锁文件")
+        .retryable(true);
     }
 
     // Default: generic Git error
@@ -232,68 +234,6 @@ pub fn normalize_existing_path(path: &str) -> AppResult<String> {
     Ok(normalized.to_string_lossy().to_string())
 }
 
-/// Scan directories for Git repositories
-pub fn scan_repositories(
-    root_path: &str,
-    max_depth: usize,
-    settings: &AppSettings,
-) -> AppResult<Vec<ScannedRepository>> {
-    ensure_git_available()?;
-    let normalized_root = normalize_existing_path(root_path)?;
-    let ignored = settings
-        .ignored_directories
-        .iter()
-        .map(|item| item.to_lowercase())
-        .collect::<HashSet<_>>();
-
-    let mut paths = HashSet::new();
-    let mut repos = Vec::new();
-
-    let should_keep = |entry: &DirEntry| {
-        let name = entry.file_name().to_string_lossy().to_lowercase();
-        if entry.depth() == 0 {
-            return true;
-        }
-        !ignored.contains(&name)
-    };
-
-    for entry in WalkDir::new(&normalized_root)
-        .max_depth(max_depth)
-        .follow_links(false)
-        .into_iter()
-        .filter_entry(should_keep)
-        .filter_map(Result::ok)
-    {
-        let name = entry.file_name().to_string_lossy();
-        if name != ".git" {
-            continue;
-        }
-
-        let Some(parent) = entry.path().parent() else {
-            continue;
-        };
-
-        let parent_str = parent.to_string_lossy().to_string();
-        if !paths.insert(parent_str.clone()) {
-            continue;
-        }
-
-        if let Ok(inspection) = inspect_repository_internal(&parent_str, settings) {
-            repos.push(ScannedRepository {
-                path: inspection.normalized_path,
-                name: inspection.name,
-                current_branch: inspection.status.current_branch,
-                remote_url: inspection.remote_url,
-                group: "未分组".into(),
-                status: inspection.status.status_text,
-                selected: true,
-            });
-        }
-    }
-
-    repos.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
-    Ok(repos)
-}
 
 /// Clone a repository
 pub fn clone_repository(
@@ -470,7 +410,8 @@ pub fn run_command_with_cancel_legacy(
                 &format!("{} 命令执行超过 {} 秒限制。", program, timeout.as_secs()),
             )
             .with_action("检查网络连接或增加超时时间")
-            .with_detail(format!("args: {:?}", args)),
+            .with_detail(format!("args: {:?}", args))
+            .retryable(true),
         );
     }
 

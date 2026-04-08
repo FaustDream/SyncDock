@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { AppProvider, useApp } from "./context/AppContext";
 import { NavButton, CatBoatIcon } from "./components";
 import { OverviewPage, TasksPage, SettingsPage, RepositoriesPage } from "./pages";
-import { ImportModal, ScanModal, AddRepoModal, CloneRepoModal } from "./components/modals";
+import { ImportModal, AddRepoModal, CloneRepoModal } from "./components/modals";
 import { primaryNavItems, UI_TEXT } from "./constants";
 import type { SyncProgressEvent } from "./types";
 
@@ -14,11 +14,11 @@ function AppContent() {
     settings, gitEnvironment,
     notice,
     navigateToView, handleRefresh, handleSync,
-    loadSnapshot,
+    loadSnapshot, refreshWorkspaceState,
     setSyncTask, setTasks, setCurrentTaskRepoName,
     syncTask, tasks,
     setNotice,
-    setScanModalOpen, setAddModalOpen,
+    setAddModalOpen,
     handleSaveSettings,
     settingsTab
   } = useApp();
@@ -35,7 +35,7 @@ function AppContent() {
       }
     };
     init();
-  }, []);
+  }, [refreshWorkspaceState, setCurrentTaskRepoName, setSyncTask, setTasks]);
 
   // Theme
   useEffect(() => {
@@ -82,6 +82,9 @@ function AppContent() {
               ? prevTasks.map((t) => t.taskId === updatedTask.taskId ? updatedTask : t)
               : [updatedTask, ...prevTasks]
           );
+          if (!updatedTask.running) {
+            void refreshWorkspaceState(false);
+          }
         }
       });
       unlistenFn = unlisten;
@@ -140,7 +143,6 @@ function AppContent() {
                 ) : null}
                 {activePrimaryView === "repositories" && !repoDetailOpen ? (
                   <>
-                    <button className="ghost-button" onClick={() => setScanModalOpen(true)}>扫描导入</button>
                     <button className="ghost-button" onClick={() => setAddModalOpen(true)}>添加仓库</button>
                   </>
                 ) : null}
@@ -190,7 +192,6 @@ function AppContent() {
       </main>
 
       <ImportModal />
-      <ScanModal />
       <AddRepoModal />
       <CloneRepoModal />
     </div>

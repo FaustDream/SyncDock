@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use tauri::{AppHandle, Manager};
 
-use crate::models::{SyncProgressEvent, SyncTaskRecord, SyncItemState, NoticeLevel};
+use crate::models::{SyncProgressEvent, SyncTaskProgressLog, SyncTaskRecord, SyncItemState, NoticeLevel};
 
 /// Emit sync progress event to frontend
 pub fn emit_progress(
@@ -25,6 +25,32 @@ pub fn emit_progress(
             },
         );
     }
+}
+
+pub fn push_progress_log(
+    app: &AppHandle,
+    shared_task: &Arc<Mutex<SyncTaskRecord>>,
+    phase: &str,
+    level: NoticeLevel,
+    message: String,
+    repo_id: Option<String>,
+    repo_name: Option<String>,
+) {
+    if let Ok(mut task) = shared_task.lock() {
+        task.progress_logs.push(SyncTaskProgressLog {
+            at: chrono::Utc::now().to_rfc3339(),
+            level,
+            phase: phase.to_string(),
+            message,
+            repo_id: repo_id.clone(),
+            repo_name: repo_name.clone(),
+        });
+        if task.progress_logs.len() > 200 {
+            let overflow = task.progress_logs.len() - 200;
+            task.progress_logs.drain(0..overflow);
+        }
+    }
+    emit_progress(app, shared_task, repo_id, repo_name);
 }
 
 /// Update task progress after a repository sync completes

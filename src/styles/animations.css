@@ -218,3 +218,12 @@
   margin-right: 8px;
   vertical-align: middle;
 }
+
+@keyframes downloadSheen {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(420%);
+  }
+}

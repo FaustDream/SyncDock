@@ -1,3 +1,4 @@
+// 作者：凌致
 import { useCallback, useState } from "react";
 import { TabBar, InfoField } from "../components";
 import { useApp } from "../context/AppContext";
@@ -6,7 +7,7 @@ import { formatBytes, formatDateTime } from "../utils/formatters";
 import type { PreferredView, SyncMode, ThemeMode, LanguageMode } from "../types";
 import { normalizePreferredView, normalizeThemeMode, normalizeLanguageMode } from "../utils/routeHelpers";
 import { api } from "../api";
-import { checkForUpdate, openReleasePage, getCurrentVersion } from "../utils/updateChecker";
+import { checkForUpdate, getCurrentVersion } from "../utils/updateChecker";
 import type { UpdateInfo } from "../utils/updateChecker";
 
 export function SettingsPage() {
@@ -16,18 +17,15 @@ export function SettingsPage() {
     gitEnvironment, logsDiagnostics,
     configDirectory, logsDirectory,
     busyAction,
-    handleSaveSettings, handleCleanupLogs, handleExportConfig,
+    handleCleanupLogs, handleExportConfig,
     handleChangeConfigDirectory, handleResetConfigDirectory, handleResetLogsDirectory,
     handleSelectImportConfig, pickFolder
   } = useApp();
 
   const text = UI_TEXT[settings.languageMode === "en-US" ? "en-US" : "zh-CN"];
-
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
-
   const currentVersion = getCurrentVersion();
-
 
   const handleCheckUpdate = useCallback(async () => {
     try {
@@ -38,28 +36,22 @@ export function SettingsPage() {
       if (info.hasUpdate) {
         const confirmMsg = settings.languageMode === "en-US"
           ? `New version ${info.latestVersion} available!\n\nCurrent: ${info.currentVersion}\nLatest: ${info.latestVersion}\n\nOpen the latest GitHub Release download page?`
-          : `发现新版本 ${info.latestVersion}！\n\n当前版本：${info.currentVersion}\n最新版本：${info.latestVersion}\n\n是否打开 GitHub Releases 最新版本下载页？`;
+          : `发现新版本 ${info.latestVersion}。\n\n当前版本：${info.currentVersion}\n最新版本：${info.latestVersion}\n\n是否打开最新 GitHub Release 下载页？`;
         if (window.confirm(confirmMsg)) {
-          await openReleasePage(info.releaseUrl);
+          await api.openExternal(info.releaseUrl);
         }
       } else {
-        const msg = settings.languageMode === "en-US"
-          ? "You are using the latest version!"
-          : "当前已是最新版本！";
-        alert(msg);
+        alert(settings.languageMode === "en-US" ? "You are using the latest version!" : "当前已是最新版本。");
       }
-    } catch (e) {
-      const errorMsg = settings.languageMode === "en-US"
+    } catch {
+      alert(settings.languageMode === "en-US"
         ? "Failed to check for updates. Please try again later."
-        : "检查更新失败，请稍后重试或检查网络连接。";
-      alert(errorMsg);
+        : "检查更新失败，请稍后重试。");
     } finally {
       setCheckingUpdate(false);
     }
-  }, [settings.languageMode, currentVersion]);
+  }, [currentVersion, settings.languageMode]);
 
-
-  // 主题切换时立即保存
   const handleThemeChange = useCallback((theme: ThemeMode) => {
     const normalized = normalizeThemeMode(theme);
     const nextSettings = { ...settings, themeMode: normalized };
@@ -67,7 +59,6 @@ export function SettingsPage() {
     void api.saveSettings(nextSettings);
   }, [settings, setSettings]);
 
-  // 语言切换时立即保存
   const handleLanguageChange = useCallback((lang: LanguageMode) => {
     const normalized = normalizeLanguageMode(lang);
     const nextSettings = { ...settings, languageMode: normalized };
@@ -75,7 +66,6 @@ export function SettingsPage() {
     void api.saveSettings(nextSettings);
   }, [settings, setSettings]);
 
-  // 默认视图切换时立即保存
   const handleDefaultViewChange = useCallback((view: PreferredView) => {
     const normalized = normalizePreferredView(view);
     const nextSettings = { ...settings, defaultView: normalized };
@@ -83,7 +73,6 @@ export function SettingsPage() {
     void api.saveSettings(nextSettings);
   }, [settings, setSettings]);
 
-  // 通用设置更新并保存
   const updateAndSave = useCallback((updates: Partial<typeof settings>) => {
     const nextSettings = { ...settings, ...updates };
     setSettings(nextSettings);
@@ -97,11 +86,10 @@ export function SettingsPage() {
           { key: "general", label: text.settingsTabs.general },
           { key: "sync", label: text.settingsTabs.sync },
           { key: "paths", label: text.settingsTabs.paths },
-          { key: "repositories", label: text.settingsTabs.repositories },
           { key: "about", label: text.settingsTabs.about }
         ]}
         activeKey={settingsTab}
-        onChange={(key) => setSettingsTab(key as "general" | "sync" | "paths" | "repositories" | "about")}
+        onChange={(key) => setSettingsTab(key as "general" | "sync" | "paths" | "about")}
       />
 
       {settingsTab === "general" ? (
@@ -153,7 +141,7 @@ export function SettingsPage() {
                 <option value="force">Force - 强制模式</option>
                 <option value="rebase">Rebase - 变基模式</option>
               </select>
-              <p className="helper">Safe: 跳过有本地更改的仓库；Force: 强制覆盖本地更改；Rebase: 变基合并</p>
+              <p className="helper">Safe：跳过有本地修改的仓库；Force：强制覆盖本地变更；Rebase：以变基方式同步。</p>
             </label>
             <label>
               <span>并发数</span>
@@ -168,8 +156,8 @@ export function SettingsPage() {
               <span>跳过未跟踪文件</span>
             </label>
             <label className="switch-row">
-              <input type="checkbox" disabled />
-              <span>自动重试瞬时失败（待接入）</span>
+              <input type="checkbox" checked={settings.autoRetryTransientFailures} onChange={(e) => updateAndSave({ autoRetryTransientFailures: e.target.checked })} />
+              <span>自动重试瞬时失败</span>
             </label>
           </div>
         </div>
@@ -177,34 +165,33 @@ export function SettingsPage() {
 
       {settingsTab === "paths" ? (
         <div className="settings-tab-content">
-          <div className="info-grid compact">
-            <InfoField label="配置目录" value={configDirectory || "-"} />
-            <InfoField label="当前日志目录" value={logsDiagnostics.directory || logsDirectory || "-"} />
-          </div>
           <section className="inset-card">
-            <div className="panel-header mini"><div><h4>默认扫描目录</h4><p className="muted">导入仓库时的默认扫描根路径</p></div></div>
-            <div className="info-grid compact">
-              <InfoField label="当前目录" value={settings.defaultScanRoot || "未设置"} />
-            </div>
-            <div className="inline-actions wrap">
-              <button className="ghost-button" onClick={() => void pickFolder((v) => updateAndSave({ defaultScanRoot: v }))}>选择目录</button>
-              {settings.defaultScanRoot ? <button className="ghost-button" onClick={() => updateAndSave({ defaultScanRoot: "" })}>清除</button> : null}
+            <div className="panel-header mini"><div><h4>配置目录</h4><p className="muted">修改后建议重启应用。</p></div></div>
+            <div className="settings-path-row">
+              <div className="settings-path-field">
+                <InfoField label="当前配置路径" value={configDirectory || "-"} />
+              </div>
+              <div className="inline-actions wrap settings-path-actions">
+                <button className="ghost-button" onClick={() => void handleChangeConfigDirectory()} disabled={busyAction === "config-directory"}>修改目录</button>
+                <button className="ghost-button" onClick={() => void handleResetConfigDirectory()} disabled={busyAction === "config-directory"}>恢复默认</button>
+              </div>
             </div>
           </section>
-          <section className="inset-card">
-            <div className="panel-header mini"><div><h4>配置目录</h4><p className="muted">修改后建议重启应用</p></div></div>
-            <div className="inline-actions wrap">
-              <button className="ghost-button" onClick={() => void handleChangeConfigDirectory()} disabled={busyAction === "config-directory"}>修改目录</button>
-              <button className="ghost-button" onClick={() => void handleResetConfigDirectory()} disabled={busyAction === "config-directory"}>恢复默认</button>
-            </div>
-          </section>
+
           <section className="inset-card">
             <div className="panel-header mini"><div><h4>日志目录</h4></div></div>
-            <div className="inline-actions wrap">
-              <button className="ghost-button" onClick={handleResetLogsDirectory}>恢复默认</button>
-              <button className="ghost-button" onClick={() => void handleCleanupLogs()} disabled={busyAction === "cleanup-logs"}>清理日志</button>
+            <div className="settings-path-row">
+              <div className="settings-path-field">
+                <InfoField label="当前日志路径" value={logsDiagnostics.directory || logsDirectory || "-"} />
+              </div>
+              <div className="inline-actions wrap settings-path-actions">
+                <button className="ghost-button" onClick={() => void pickFolder((v) => updateAndSave({ logsDirectory: v }))}>选择日志目录</button>
+                <button className="ghost-button" onClick={handleResetLogsDirectory}>恢复默认</button>
+                <button className="ghost-button" onClick={() => void handleCleanupLogs()} disabled={busyAction === "cleanup-logs"}>清理日志</button>
+              </div>
             </div>
           </section>
+
           <div className="form-grid two-columns">
             <label>
               <span>日志保留天数</span>
@@ -222,92 +209,60 @@ export function SettingsPage() {
               <span>保留调试日志</span>
             </label>
           </div>
-        </div>
-      ) : null}
 
-      {settingsTab === "repositories" ? (
-        <div className="settings-tab-content">
-          <div className="form-grid two-columns">
-            <label className="full-span">
-              <span>忽略目录（逗号分隔）</span>
-              <input value={settings.ignoredDirectories.join(", ")} onChange={(e) => updateAndSave({ ignoredDirectories: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })} />
-            </label>
-            <label>
-              <span>扫描深度</span>
-              <input type="number" min={1} max={12} value={settings.scanDepth} onChange={(e) => updateAndSave({ scanDepth: Number(e.target.value) || 4 })} />
-            </label>
-          </div>
-          <div className="inline-actions wrap">
-            <button className="ghost-button" onClick={() => void handleExportConfig()} disabled={busyAction === "export-config"}>导出仓库配置</button>
-            <button className="ghost-button" onClick={() => void handleSelectImportConfig()} disabled={busyAction === "preview-config" || busyAction === "import-config"}>导入仓库配置</button>
-          </div>
+          <section className="inset-card">
+            <div className="panel-header mini">
+              <div>
+                <h4>仓库配置</h4>
+                <p className="muted">导出当前仓库清单与任务摘要，或从其他设备导入已有仓库配置。</p>
+              </div>
+            </div>
+            <div className="settings-tip">
+              <span className="settings-tip-badge">Tips</span>
+              <p>导入前会先预检冲突和无效路径；导出不会打包仓库代码，只保存配置、仓库记录和任务摘要。</p>
+            </div>
+            <div className="inline-actions wrap settings-path-actions">
+              <button className="ghost-button" onClick={() => void handleExportConfig()} disabled={busyAction === "export-config"}>导出仓库配置</button>
+              <button className="ghost-button" onClick={() => void handleSelectImportConfig()} disabled={busyAction === "preview-config" || busyAction === "import-config"}>导入仓库配置</button>
+            </div>
+          </section>
         </div>
       ) : null}
 
       {settingsTab === "about" ? (
         <div className="settings-tab-content">
-          <div className="panel-grid two-columns">
-            <section className="inset-card">
-              <div className="panel-header mini"><div><h4>应用信息</h4></div></div>
-              <div className="info-grid compact">
-                <InfoField label="版本号" value={currentVersion} />
-                <InfoField label="Git 环境" value={gitEnvironment.available ? "可用" : "不可用"} />
-                <InfoField label="Git 版本" value={gitEnvironment.version || "-"} />
-                {updateInfo && (
-                  <>
-                    <InfoField
-                      label="最新版本"
-                      value={updateInfo.hasUpdate ? `${updateInfo.latestVersion} (有更新)` : `${updateInfo.latestVersion} (已是最新)`}
-                    />
-                    <InfoField label="检查来源" value="GitHub Releases" />
-                    {updateInfo.publishedAt && (
-
-                      <InfoField label="发布日期" value={formatDateTime(updateInfo.publishedAt)} />
-                    )}
-                  </>
-                )}
-              </div>
-              <div className="inline-actions wrap">
-                <button className="primary-button" onClick={() => void handleCheckUpdate()} disabled={checkingUpdate}>
-                  {checkingUpdate ? <><span className="inline-spinner"></span>检查中...</> : "检查更新"}
-                </button>
-                {updateInfo?.hasUpdate && (
-                  <button className="ghost-button" onClick={() => void openReleasePage(updateInfo.releaseUrl)}>
-                    查看更新详情
-                  </button>
-                )}
-                {updateInfo?.releaseNotes ? (
-                  <p className="helper full-width">最近发布说明：{updateInfo.releaseNotes.split("\n").find((line) => line.trim()) || "检测到新版本，可前往 GitHub Releases 最新版本下载页查看并下载。"}</p>
-
-                ) : null}
-                <button className="ghost-button" onClick={() => void handleExportConfig()} disabled={busyAction === "export-config"}>导出诊断配置</button>
-              </div>
-
-            </section>
-            <section className="inset-card">
-              <div className="panel-header mini"><div><h4>环境状态</h4></div></div>
-              <div className="info-grid compact">
-                <InfoField label="日志文件数" value={String(logsDiagnostics.fileCount)} />
-                <InfoField label="占用空间" value={formatBytes(logsDiagnostics.totalSizeBytes)} />
-                <InfoField label="Git 说明" value={gitEnvironment.message} />
-              </div>
-            </section>
-          </div>
-          <section className="inset-card">
-            <div className="panel-header mini"><div><h4>关于 SyncDock</h4></div></div>
-            <p className="muted">
-              SyncDock 是一款专为开发者设计的 Git 仓库批量同步工具，支持多仓库管理、智能状态检测、批量同步等功能。
-            </p>
-            <div className="inline-actions wrap">
+          <section className="inset-card about-section-card">
+            <div className="panel-header mini"><div><h4>应用信息</h4></div></div>
+            <div className="info-grid compact about-info-grid">
+              <InfoField label="版本号" value={currentVersion} />
+              <InfoField label="Git 环境" value={gitEnvironment.available ? "可用" : "不可用"} />
+              <InfoField label="Git 版本" value={gitEnvironment.version || "-"} />
+              <InfoField label="最新版本" value={updateInfo ? (updateInfo.hasUpdate ? `${updateInfo.latestVersion}（可更新）` : `${updateInfo.latestVersion}（已是最新）`) : "-"} />
+              <InfoField label="检查来源" value="GitHub" />
+              <InfoField label="发布时间" value={updateInfo?.publishedAt ? formatDateTime(updateInfo.publishedAt) : "-"} />
+            </div>
+            <div className="about-action-grid">
+              <button className="primary-button" onClick={() => void handleCheckUpdate()} disabled={checkingUpdate}>
+                {checkingUpdate ? <><span className="inline-spinner"></span>检查中...</> : "检查更新"}
+              </button>
               <button className="ghost-button" onClick={() => void api.openExternal("https://github.com/FaustDream/SyncDock")}>
                 GitHub 仓库
-              </button>
-              <button className="ghost-button" onClick={() => void api.openExternal("https://github.com/FaustDream/SyncDock/releases")}>
-                发布页面
               </button>
               <button className="ghost-button" onClick={() => void api.openExternal("https://github.com/FaustDream/SyncDock/issues")}>
                 反馈问题
               </button>
+              <button className="ghost-button" onClick={() => void handleExportConfig()} disabled={busyAction === "export-config"}>
+                导出诊断配置
+              </button>
+            </div>
+          </section>
+
+          <section className="inset-card about-section-card">
+            <div className="panel-header mini"><div><h4>环境状态</h4></div></div>
+            <div className="info-grid compact about-status-grid">
+              <InfoField label="日志文件数" value={String(logsDiagnostics.fileCount)} />
+              <InfoField label="占用空间" value={formatBytes(logsDiagnostics.totalSizeBytes)} />
+              <InfoField label="Git 说明" value={gitEnvironment.message} />
             </div>
           </section>
         </div>

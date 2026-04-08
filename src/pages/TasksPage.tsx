@@ -18,6 +18,12 @@ import { formatDateTime } from "../utils/formatters";
 import { toneFromTaskState, toneFromTaskRecord, getTaskModeLabel, getTaskStatusLabel, getTaskStatusHint, prioritizeTaskItems } from "../utils/taskHelpers";
 import { parseTaskLog } from "../utils/logParser";
 
+function getTodayDateKey() {
+  const now = new Date();
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
+}
+
 export function TasksPage() {
   const {
     taskTab, setTaskTab,
@@ -40,9 +46,11 @@ export function TasksPage() {
     return tasks.filter((task) => {
       if (taskSearch) {
         const query = taskSearch.toLowerCase();
-        if (!task.summaryMessage.toLowerCase().includes(query) &&
-            !task.taskId.toLowerCase().includes(query) &&
-            !task.items.some((item) => item.repoName.toLowerCase().includes(query))) {
+        if (
+          !task.summaryMessage.toLowerCase().includes(query) &&
+          !task.taskId.toLowerCase().includes(query) &&
+          !task.items.some((item) => item.repoName.toLowerCase().includes(query))
+        ) {
           return false;
         }
       }
@@ -60,9 +68,14 @@ export function TasksPage() {
   const [taskLogContent, setTaskLogContent] = useState("");
   useEffect(() => {
     const taskId = selectedTask?.taskId;
-    if (!taskId) { setTaskLogContent(""); return; }
+    if (!taskId) {
+      setTaskLogContent("");
+      return;
+    }
     let cancelled = false;
-    api.getTaskLog(taskId).then((log) => { if (!cancelled) setTaskLogContent(log); }).catch(() => { if (!cancelled) setTaskLogContent(""); });
+    api.getTaskLog(taskId)
+      .then((log) => { if (!cancelled) setTaskLogContent(log); })
+      .catch(() => { if (!cancelled) setTaskLogContent(""); });
     return () => { cancelled = true; };
   }, [selectedTask?.taskId]);
 
@@ -71,13 +84,16 @@ export function TasksPage() {
     maxLines: LOG_PARSE_MAX_LINES,
     maxLineLength: LOG_LINE_TEXT_MAX_LENGTH
   }), [selectedTaskLog]);
+
   const filteredLogLines = useMemo(() => {
     return parsedLogLines.filter((line) => {
       if (taskLogSearch) {
         const query = taskLogSearch.toLowerCase();
-        if (!line.text.toLowerCase().includes(query) &&
-            !(line.repoName?.toLowerCase().includes(query)) &&
-            !(line.code?.toLowerCase().includes(query))) {
+        if (
+          !line.text.toLowerCase().includes(query) &&
+          !(line.repoName?.toLowerCase().includes(query)) &&
+          !(line.code?.toLowerCase().includes(query))
+        ) {
           return false;
         }
       }
@@ -89,7 +105,24 @@ export function TasksPage() {
 
   const syncProgress = activeTask && activeTask.total > 0 ? (activeTask.completed / activeTask.total) * 100 : 0;
   const activeTaskStatusHint = activeTask ? getTaskStatusHint(activeTask, currentTaskRepoName) : "";
-  const pendingCancelTask = pendingCancelTaskId ? tasks.find((task) => task.taskId === pendingCancelTaskId) ?? (activeTask?.taskId === pendingCancelTaskId ? activeTask : null) : null;
+  const pendingCancelTask = pendingCancelTaskId
+    ? tasks.find((task) => task.taskId === pendingCancelTaskId) ?? (activeTask?.taskId === pendingCancelTaskId ? activeTask : null)
+    : null;
+  const activeProgressLogs = activeTask?.progressLogs.slice().reverse().slice(0, 8) ?? [];
+
+  const todayTaskGroups = useMemo(() => {
+    const todayKey = getTodayDateKey();
+    const allTodayTasks = [activeTask, ...tasks]
+      .filter((task): task is NonNullable<typeof task> => Boolean(task))
+      .filter((task, index, list) => list.findIndex((item) => item?.taskId === task.taskId) === index)
+      .filter((task) => task.startTime.slice(0, 10) === todayKey);
+
+    return {
+      running: allTodayTasks.filter((task) => task.running),
+      completed: allTodayTasks.filter((task) => !task.running && !task.cancelled),
+      cancelled: allTodayTasks.filter((task) => !task.running && task.cancelled)
+    };
+  }, [activeTask, tasks]);
 
   return (
     <>
@@ -113,7 +146,16 @@ export function TasksPage() {
               </div>
               {activeTask ? (
                 <>
-                  <div className="progress-bar"><span style={{ width: `${syncProgress}%` }} /></div>
+                  <div className="task-active-progress">
+                    <div className="task-active-progress-head">
+                      <strong>{`已完成 ${activeTask.completed} / ${activeTask.total}`}</strong>
+                      <span>{`${Math.round(syncProgress)}%`}</span>
+                    </div>
+                    <div className="progress-bar download-progress">
+                      <span style={{ width: `${syncProgress}%` }} />
+                    </div>
+                    {activeTask.running ? <div className="download-progress-sheen" /> : null}
+                  </div>
                   <p>{activeTask.summaryMessage}</p>
                   <div className="summary-row wrap">
                     <SummaryPill label="成功" value={activeTask.successCount} tone="success" />
@@ -124,6 +166,17 @@ export function TasksPage() {
                     ) : null}
                   </div>
                   {activeTaskStatusHint ? <p className="helper">{activeTaskStatusHint}</p> : null}
+                  {activeProgressLogs.length ? (
+                    <div className="task-progress-log-list">
+                      {activeProgressLogs.map((entry) => (
+                        <div key={`${entry.at}-${entry.phase}-${entry.message}`} className="task-progress-log-item">
+                          <span className="task-progress-log-time">{formatDateTime(entry.at)}</span>
+                          <Badge tone={entry.level === "error" ? "danger" : entry.level === "warning" ? "warning" : "pending"} text={entry.phase} />
+                          <span className="task-progress-log-message">{entry.repoName ? `${entry.repoName} · ${entry.message}` : entry.message}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                   <div className="stack-list compact-list">
                     {(() => {
                       const runningItem = activeTask.items.find((item) => item.state === "checking" || item.state === "fetching" || item.state === "pulling" || item.state === "comparing");
@@ -136,7 +189,7 @@ export function TasksPage() {
                                 <span className="repo-name"><span className="inline-spinner"></span>{runningItem.repoName}</span>
                                 <Badge tone="pending" text="执行中..." />
                               </div>
-                              <p className="muted">正在处理...</p>
+                              <p className="muted">正在处理中...</p>
                             </div>
                           ) : null}
                           {completedItems.slice(0, 5).map((item, index) => (
@@ -154,12 +207,92 @@ export function TasksPage() {
                   </div>
                 </>
               ) : (
-                <EmptyState title="暂无任务记录" description="点击顶部「同步全部」后，这里会出现最近运行摘要。" />
+                <EmptyState title="当前没有进行中的任务" description="同步、强制同步或刷新状态后，这里会显示实时进度。" />
               )}
-              <div className="inline-actions wrap">
-                <button className="ghost-button" onClick={() => setPendingCancelTaskId(activeTask?.taskId ?? null)} disabled={!activeTask?.running || activeTask.cancelRequested || busyAction === "cancel-task"}>
-                  {activeTask?.cancelRequested ? "正在取消..." : "取消当前任务"}
-                </button>
+              {activeTask ? (
+                <div className="inline-actions wrap">
+                  <button
+                    className="ghost-button"
+                    onClick={() => setPendingCancelTaskId(activeTask?.taskId ?? null)}
+                    disabled={!activeTask?.running || activeTask.cancelRequested || busyAction === "cancel-task"}
+                  >
+                    {activeTask?.cancelRequested ? "正在取消..." : "取消当前任务"}
+                  </button>
+                </div>
+              ) : null}
+            </section>
+
+            <section className="inset-card">
+              <div className="panel-header mini">
+                <div>
+                  <h4>今日任务</h4>
+                  <p className="muted">默认只显示今天的任务，其他日期请到历史任务查看。</p>
+                </div>
+              </div>
+              <div className="task-day-groups">
+                {todayTaskGroups.running.length ? (
+                  <div className="task-day-group">
+                    <div className="task-day-group-head">
+                      <h5>进行中</h5>
+                      <Badge tone="pending" text={`${todayTaskGroups.running.length}`} />
+                    </div>
+                    <div className="task-day-list">
+                      {todayTaskGroups.running.map((task) => (
+                        <button key={task.taskId} className="task-day-item" onClick={() => openTaskDetail(task.taskId)}>
+                          <div className="task-day-item-main">
+                            <strong>{getTaskModeLabel(task.mode)}</strong>
+                            <span className="task-day-item-meta">{formatDateTime(task.startTime)} · {task.summaryMessage}</span>
+                          </div>
+                          <Badge tone={toneFromTaskRecord(task)} text={getTaskStatusLabel(task)} />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {todayTaskGroups.completed.length ? (
+                  <div className="task-day-group">
+                    <div className="task-day-group-head">
+                      <h5>已完成</h5>
+                      <Badge tone="success" text={`${todayTaskGroups.completed.length}`} />
+                    </div>
+                    <div className="task-day-list">
+                      {todayTaskGroups.completed.map((task) => (
+                        <button key={task.taskId} className="task-day-item" onClick={() => openTaskDetail(task.taskId)}>
+                          <div className="task-day-item-main">
+                            <strong>{getTaskModeLabel(task.mode)}</strong>
+                            <span className="task-day-item-meta">{formatDateTime(task.startTime)} · {task.summaryMessage}</span>
+                          </div>
+                          <Badge tone={toneFromTaskRecord(task)} text={getTaskStatusLabel(task)} />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {todayTaskGroups.cancelled.length ? (
+                  <div className="task-day-group">
+                    <div className="task-day-group-head">
+                      <h5>已取消</h5>
+                      <Badge tone="neutral" text={`${todayTaskGroups.cancelled.length}`} />
+                    </div>
+                    <div className="task-day-list">
+                      {todayTaskGroups.cancelled.map((task) => (
+                        <button key={task.taskId} className="task-day-item" onClick={() => openTaskDetail(task.taskId)}>
+                          <div className="task-day-item-main">
+                            <strong>{getTaskModeLabel(task.mode)}</strong>
+                            <span className="task-day-item-meta">{formatDateTime(task.startTime)} · {task.summaryMessage}</span>
+                          </div>
+                          <Badge tone={toneFromTaskRecord(task)} text={getTaskStatusLabel(task)} />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {!todayTaskGroups.running.length && !todayTaskGroups.completed.length && !todayTaskGroups.cancelled.length ? (
+                  <EmptyState title="今天还没有任务" description="今天执行过的同步、刷新和取消任务会显示在这里。" />
+                ) : null}
               </div>
             </section>
           </div>
@@ -168,7 +301,6 @@ export function TasksPage() {
         {taskTab === "history" ? (
           <div className="view-stack">
             <div className="task-toolbar theme-elevated-block">
-
               <label className="search-box compact-search">
                 <input value={taskSearch} onChange={(e) => setTaskSearch(e.target.value)} placeholder="搜索任务摘要、任务 ID、仓库名" />
               </label>
@@ -176,7 +308,7 @@ export function TasksPage() {
                 <option value="all">全部结果</option>
                 <option value="failed">有失败</option>
                 <option value="warning">有跳过/取消</option>
-                <option value="success">全成功</option>
+                <option value="success">全部成功</option>
               </select>
               <input type="date" value={taskDateFilter} onChange={(e) => setTaskDateFilter(e.target.value)} />
             </div>
@@ -184,10 +316,8 @@ export function TasksPage() {
               tasks={filteredTasks}
               activeTaskId={activeTask?.taskId}
               currentTaskRepoName={currentTaskRepoName ?? undefined}
-
               selectedTaskId={selectedTaskId}
               busyAction={busyAction ?? undefined}
-
               onOpenTaskDetail={openTaskDetail}
               onRequestCancel={(taskId) => setPendingCancelTaskId(taskId)}
             />
@@ -216,7 +346,6 @@ export function TasksPage() {
           </div>
         ) : null}
 
-
         <Modal open={taskDetailModalOpen} title="任务详情" onClose={() => setTaskDetailModalOpen(false)}>
           {selectedTask ? (
             <div className="view-stack">
@@ -244,8 +373,8 @@ export function TasksPage() {
             <AlertDialogTitle>确认取消当前任务？</AlertDialogTitle>
             <AlertDialogDescription>
               {pendingCancelTask
-                ? `任务 ${pendingCancelTask.taskId} 正在执行中。确认后会请求停止当前同步流程，可能需要等待正在执行的仓库完成当前命令。`
-                : "确认后会请求停止当前同步流程，可能需要等待正在执行的仓库完成当前命令。"}
+                ? `任务 ${pendingCancelTask.taskId} 正在执行中。确认后会请求停止当前后台流程，可能需要等待正在执行的仓库先结束当前命令。`
+                : "确认后会请求停止当前后台流程，可能需要等待正在执行的仓库先结束当前命令。"}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -268,4 +397,3 @@ export function TasksPage() {
     </>
   );
 }
-

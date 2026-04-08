@@ -13,12 +13,12 @@ use uuid::Uuid;
 
 use crate::{
     errors::{AppError, AppResult},
-    git::{detect_git_environment, inspect_repository, scan_repositories as scan_local_repositories, clone_repository},
+    git::{detect_git_environment, inspect_repository, clone_repository},
     models::{
         AppSettings, AppSnapshot, CloneRepositoryRequest, ConfigExportResult,
         ConfigImportPreview, ConfigImportRequest, ConfigImportResult, LogCleanupResult,
         LogsDiagnostics, NoticeLevel, RepositoryDraftInput, RepositoryRecord,
-        RepositoryUpdateInput, ScanRequest, ScannedRepository, SyncTaskRecord,
+        RepositoryUpdateInput, SyncTaskRecord,
     },
     sync::SyncRuntimeState,
 };
@@ -101,6 +101,11 @@ fn get_repository_log(app: AppHandle, repo_id: String) -> AppResult<String> {
 }
 
 #[tauri::command]
+fn get_all_repository_logs(app: AppHandle) -> AppResult<String> {
+    storage::read_all_repository_logs(&app).map_err(map_log_view_load_error)
+}
+
+#[tauri::command]
 fn export_task_log(app: AppHandle, task_id: String, destination: String) -> AppResult<String> {
     storage::export_task_log(&app, &task_id, &destination)
 }
@@ -108,6 +113,11 @@ fn export_task_log(app: AppHandle, task_id: String, destination: String) -> AppR
 #[tauri::command]
 fn export_repository_log(app: AppHandle, repo_id: String, destination: String) -> AppResult<String> {
     storage::export_repository_log(&app, &repo_id, &destination)
+}
+
+#[tauri::command]
+fn export_all_repository_logs(app: AppHandle, destination: String) -> AppResult<String> {
+    storage::export_all_repository_logs(&app, &destination)
 }
 
 #[tauri::command]
@@ -123,41 +133,6 @@ fn preview_config_import(app: AppHandle, source: String) -> AppResult<ConfigImpo
 #[tauri::command]
 fn import_config(app: AppHandle, request: ConfigImportRequest) -> AppResult<ConfigImportResult> {
     storage::import_config(&app, &request)
-}
-
-#[tauri::command]
-fn scan_repositories(app: AppHandle, request: ScanRequest) -> AppResult<Vec<ScannedRepository>> {
-    let settings = storage::load_settings(&app)?;
-    let max_depth = request.max_depth.unwrap_or(settings.scan_depth);
-    scan_local_repositories(&request.root_path, max_depth, &settings)
-}
-
-#[tauri::command]
-fn import_scanned_repositories(
-    app: AppHandle,
-    repositories: Vec<ScannedRepository>,
-) -> AppResult<Vec<RepositoryRecord>> {
-    let settings = storage::load_settings(&app)?;
-    let mut existing = storage::load_repositories(&app)?;
-    let mut imported = Vec::new();
-
-    for scanned in repositories.into_iter().filter(|repo| repo.selected) {
-        let input = RepositoryDraftInput {
-            path: scanned.path,
-            name: Some(scanned.name),
-            group: Some(scanned.group),
-            ownership: scanned.ownership,
-            note: None,
-        };
-        if let Ok(record) = create_repository_record(&settings, &existing, input) {
-            existing.push(record.clone());
-            imported.push(record);
-        }
-    }
-
-    storage::sort_repositories(&mut existing);
-    storage::save_repositories(&app, &existing)?;
-    Ok(imported)
 }
 
 #[tauri::command]
@@ -265,6 +240,15 @@ fn refresh_repositories(app: AppHandle, repo_ids: Option<Vec<String>>) -> AppRes
     storage::sort_repositories(&mut repositories);
     storage::save_repositories(&app, &repositories)?;
     Ok(repositories)
+}
+
+#[tauri::command]
+fn refresh_repositories_command(
+    app: AppHandle,
+    runtime: State<SyncRuntimeState>,
+    repo_ids: Option<Vec<String>>,
+) -> AppResult<SyncTaskRecord> {
+    sync::refresh_repositories(&app, runtime.inner(), repo_ids)
 }
 
 #[tauri::command]
@@ -421,17 +405,18 @@ fn main() {
             cleanup_logs,
             get_task_log,
             get_repository_log,
+            get_all_repository_logs,
             export_task_log,
             export_repository_log,
+            export_all_repository_logs,
             export_config,
             preview_config_import,
             import_config,
-            scan_repositories,
-            import_scanned_repositories,
             add_repository,
             update_repository,
             remove_repository,
             refresh_repositories,
+            refresh_repositories_command,
             sync_repositories_command,
             force_sync_repositories_command,
             cancel_sync_task_command,

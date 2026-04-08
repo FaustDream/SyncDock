@@ -23,7 +23,7 @@ pub use repositories::{load_repositories, save_repositories, sort_repositories};
 pub use tasks::{load_tasks, save_tasks, sort_tasks};
 pub use logs::{
     append_task_log, read_task_log, export_task_log,
-    append_repository_log, read_repository_log, export_repository_log,
+    append_repository_log, read_repository_log, read_all_repository_logs, export_repository_log, export_all_repository_logs,
     get_logs_diagnostics, cleanup_logs,
 };
 pub use import_export::{export_config, preview_config_import, import_config};

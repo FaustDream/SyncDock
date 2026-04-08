@@ -13,8 +13,6 @@ import type {
   RepositoryDraftInput,
   RepositoryRecord,
   RepositoryUpdateInput,
-  ScanRequest,
-  ScannedRepository,
   SyncTaskRecord
 } from "./types";
 
@@ -45,22 +43,24 @@ export const api = {
 
   cleanupLogs: () => invoke<LogCleanupResult>("cleanup_logs"),
   getRepositoryLog: (repoId: string) => invoke<string>("get_repository_log", { repoId }),
+  getAllRepositoryLogs: () => invoke<string>("get_all_repository_logs"),
   exportTaskLog: (taskId: string, destination: string) =>
     invoke<string>("export_task_log", { taskId, destination }),
   exportRepositoryLog: (repoId: string, destination: string) =>
     invoke<string>("export_repository_log", { repoId, destination }),
+  exportAllRepositoryLogs: (destination: string) =>
+    invoke<string>("export_all_repository_logs", { destination }),
   exportConfig: (destination: string) => invoke<ConfigExportResult>("export_config", { destination }),
   previewConfigImport: (source: string) => invoke<ConfigImportPreview>("preview_config_import", { source }),
   importConfig: (request: ConfigImportRequest) => invoke<ConfigImportResult>("import_config", { request }),
-  scanRepositories: (request: ScanRequest) => invoke<ScannedRepository[]>("scan_repositories", { request }),
-  importScannedRepositories: (repositories: ScannedRepository[]) =>
-    invoke<RepositoryRecord[]>("import_scanned_repositories", { repositories }),
   addRepository: (input: RepositoryDraftInput) => invoke<RepositoryRecord>("add_repository", { input }),
   updateRepository: (input: RepositoryUpdateInput) =>
     invoke<RepositoryRecord>("update_repository", { input }),
   removeRepository: (repoId: string) => invoke<void>("remove_repository", { repoId }),
   refreshRepositories: (repoIds?: string[]) =>
     invoke<RepositoryRecord[]>("refresh_repositories", { repoIds: repoIds?.length ? repoIds : null }),
+  refreshRepositoriesInBackground: (repoIds?: string[]) =>
+    invoke<SyncTaskRecord>("refresh_repositories_command", { repoIds: repoIds?.length ? repoIds : null }),
   syncRepositories: (repoIds?: string[], group?: string) =>
     invoke<SyncTaskRecord>("sync_repositories_command", {
       repoIds: repoIds?.length ? repoIds : null,
