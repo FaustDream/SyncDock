@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+import subprocess
 
 from syncdock.config_service import RepositoryConfig, SettingsConfig
 
@@ -11,6 +12,34 @@ class SyncResult:
     name: str
     outcome: str
     message: str
+
+
+class GitCommandRunner:
+    def run(self, cwd: str, args: list[str], timeout_seconds: int) -> tuple[bool, str]:
+        try:
+            completed = subprocess.run(
+                ["git", *args],
+                cwd=cwd,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=timeout_seconds,
+            )
+        except subprocess.TimeoutExpired:
+            return False, "同步失败，Git 执行超时"
+        except subprocess.CalledProcessError as error:
+            stderr = (error.stderr or "").lower()
+            if "could not read from remote repository" in stderr or "permission denied" in stderr:
+                return False, "同步失败，没有权限访问仓库"
+            if "could not resolve host" in stderr or "failed to connect" in stderr:
+                return False, "同步失败，网络连接异常"
+            if "not possible to fast-forward" in stderr or "divergent branches" in stderr:
+                return False, "同步失败，需要手动处理分支差异"
+            return False, "同步失败，Git 命令执行失败"
+
+        output = completed.stdout.strip() or completed.stderr.strip()
+        return True, output
 
 
 def summarize_results(results: list[SyncResult]) -> dict[str, int]:
@@ -43,8 +72,6 @@ def sync_single_repository(repository: RepositoryConfig, settings: SettingsConfi
         return SyncResult(repository.name, "SKIPPED", inspection["message"])
     if inspection["kind"] == "failed":
         return SyncResult(repository.name, "FAILED", inspection["message"])
-    if not inspection["needs_pull"]:
-        return SyncResult(repository.name, "UP_TO_DATE", "已经是最新")
 
     fetch_ok, fetch_message = git_runner.run(
         repository.path,
@@ -54,6 +81,16 @@ def sync_single_repository(repository: RepositoryConfig, settings: SettingsConfi
     if not fetch_ok:
         return SyncResult(repository.name, "FAILED", fetch_message)
 
+    inspection = checker.inspect(repository, settings)
+    if inspection["kind"] == "invalid":
+        return SyncResult(repository.name, "INVALID", inspection["message"])
+    if inspection["kind"] == "skipped":
+        return SyncResult(repository.name, "SKIPPED", inspection["message"])
+    if inspection["kind"] == "failed":
+        return SyncResult(repository.name, "FAILED", inspection["message"])
+    if not inspection["needs_pull"]:
+        return SyncResult(repository.name, "UP_TO_DATE", "已经是最新")
+
     pull_ok, pull_message = git_runner.run(
         repository.path,
         ["pull", "--ff-only"],
@@ -62,7 +99,7 @@ def sync_single_repository(repository: RepositoryConfig, settings: SettingsConfi
     if not pull_ok:
         return SyncResult(repository.name, "FAILED", pull_message)
 
-    return SyncResult(repository.name, "UPDATED", pull_message or "已拉取最新代码")
+    return SyncResult(repository.name, "UPDATED", "已拉取最新代码")
 
 
 def sync_all_repositories(

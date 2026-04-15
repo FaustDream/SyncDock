@@ -15,3 +15,5 @@ Releases/
 .vscode/
 *.swp
 *.swo
+__pycache__/
+.pytest_cache/

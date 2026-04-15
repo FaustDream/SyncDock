@@ -16,10 +16,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     project_root = Path(__file__).resolve().parent.parent
-    runtime = load_runtime_config(project_root / "config")
+    config_dir = project_root / "config"
+    log_dir = project_root / "logs"
+    runtime = load_runtime_config(config_dir)
     if args.silent:
-        return run_menu(runtime, silent=True)
-    return run_menu(runtime, silent=False)
+        return run_menu(runtime, silent=True, config_dir=config_dir, log_dir=log_dir)
+    return run_menu(runtime, silent=False, config_dir=config_dir, log_dir=log_dir)
 
 
 if __name__ == "__main__":
