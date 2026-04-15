@@ -125,5 +125,9 @@ def run_menu(
             if config_dir is None:
                 print("当前无法重新加载配置")
             else:
-                current_runtime = load_runtime_config(config_dir)
-                print("配置已重新加载")
+                try:
+                    current_runtime = load_runtime_config(config_dir)
+                except (OSError, ValueError) as error:
+                    print(f"重新加载配置失败：{error}")
+                else:
+                    print("配置已重新加载")

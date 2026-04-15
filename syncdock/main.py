@@ -18,7 +18,11 @@ def main(argv: list[str] | None = None) -> int:
     project_root = Path(__file__).resolve().parent.parent
     config_dir = project_root / "config"
     log_dir = project_root / "logs"
-    runtime = load_runtime_config(config_dir)
+    try:
+        runtime = load_runtime_config(config_dir)
+    except (OSError, ValueError) as error:
+        print(f"配置加载失败：{error}")
+        return 1
     if args.silent:
         return run_menu(runtime, silent=True, config_dir=config_dir, log_dir=log_dir)
     return run_menu(runtime, silent=False, config_dir=config_dir, log_dir=log_dir)

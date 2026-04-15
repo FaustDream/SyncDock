@@ -155,3 +155,24 @@ def test_run_menu_reloads_config_from_directory(monkeypatch, tmp_path: Path, cap
     assert code == 0
     assert "配置已重新加载" in output
     assert "Reloaded: 已经是最新" in output
+
+
+def test_run_menu_reload_config_shows_friendly_error(monkeypatch, tmp_path: Path, capsys):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "repositories.json").write_text("{bad json", encoding="utf-8")
+    (config_dir / "settings.json").write_text("{}", encoding="utf-8")
+    answers = iter(["5", "0"])
+    monkeypatch.setattr("builtins.input", lambda _="": next(answers))
+
+    code = run_menu(
+        _runtime(),
+        silent=False,
+        checker=FakeChecker(),
+        git_runner=FakeGitRunner(),
+        config_dir=config_dir,
+    )
+
+    output = capsys.readouterr().out
+    assert code == 0
+    assert "重新加载配置失败" in output
