@@ -39,3 +39,62 @@ def test_load_runtime_config_rejects_empty_repository_name(tmp_path: Path):
         assert "Repository name cannot be empty" in str(error)
     else:
         raise AssertionError("Expected ValueError")
+
+
+def test_load_runtime_config_rejects_empty_repository_path(tmp_path: Path):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "repositories.json").write_text(
+        '{"repositories":[{"name":"SyncDock","path":"","enabled":true}]}',
+        encoding="utf-8",
+    )
+    (config_dir / "settings.json").write_text(
+        '{"concurrent_limit":3,"command_timeout_seconds":120,"skip_uncommitted_changes":true,"skip_untracked_files":false,"log_retention_days":30}',
+        encoding="utf-8",
+    )
+
+    try:
+        load_runtime_config(config_dir)
+    except ValueError as error:
+        assert "Repository path cannot be empty" in str(error)
+    else:
+        raise AssertionError("Expected ValueError")
+
+
+def test_load_runtime_config_rejects_empty_repository_list(tmp_path: Path):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "repositories.json").write_text(
+        '{"repositories":[]}',
+        encoding="utf-8",
+    )
+    (config_dir / "settings.json").write_text(
+        '{"concurrent_limit":3,"command_timeout_seconds":120,"skip_uncommitted_changes":true,"skip_untracked_files":false,"log_retention_days":30}',
+        encoding="utf-8",
+    )
+
+    try:
+        load_runtime_config(config_dir)
+    except ValueError as error:
+        assert "At least one repository must be configured" in str(error)
+    else:
+        raise AssertionError("Expected ValueError")
+
+
+def test_load_runtime_config_clamps_minimum_numeric_settings(tmp_path: Path):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "repositories.json").write_text(
+        '{"repositories":[{"name":"SyncDock","path":"E:\\\\gitHub\\\\SyncDock","enabled":true}]}',
+        encoding="utf-8",
+    )
+    (config_dir / "settings.json").write_text(
+        '{"concurrent_limit":0,"command_timeout_seconds":1,"skip_uncommitted_changes":true,"skip_untracked_files":false,"log_retention_days":0}',
+        encoding="utf-8",
+    )
+
+    runtime = load_runtime_config(config_dir)
+
+    assert runtime.settings.concurrent_limit == 1
+    assert runtime.settings.command_timeout_seconds == 10
+    assert runtime.settings.log_retention_days == 1

@@ -109,6 +109,38 @@ def test_run_menu_sync_one_runs_selected_repository(monkeypatch, capsys):
     assert "SyncDock: 已经是最新" in output
 
 
+def test_run_menu_sync_one_rejects_non_digit_selection(monkeypatch, capsys):
+    answers = iter(["2", "abc", "0"])
+    monkeypatch.setattr("builtins.input", lambda _="": next(answers))
+
+    code = run_menu(
+        _runtime(),
+        silent=False,
+        checker=FakeChecker(),
+        git_runner=FakeGitRunner(),
+    )
+
+    output = capsys.readouterr().out
+    assert code == 0
+    assert "请输入有效编号" in output
+
+
+def test_run_menu_sync_one_rejects_out_of_range_selection(monkeypatch, capsys):
+    answers = iter(["2", "9", "0"])
+    monkeypatch.setattr("builtins.input", lambda _="": next(answers))
+
+    code = run_menu(
+        _runtime(),
+        silent=False,
+        checker=FakeChecker(),
+        git_runner=FakeGitRunner(),
+    )
+
+    output = capsys.readouterr().out
+    assert code == 0
+    assert "请输入有效编号" in output
+
+
 def test_run_menu_recent_log_displays_latest_log(monkeypatch, tmp_path: Path, capsys):
     log_dir = tmp_path / "logs"
     log_dir.mkdir()
@@ -127,6 +159,25 @@ def test_run_menu_recent_log_displays_latest_log(monkeypatch, tmp_path: Path, ca
     output = capsys.readouterr().out
     assert code == 0
     assert "最近一次日志" in output
+
+
+def test_run_menu_recent_log_shows_empty_message_for_empty_directory(monkeypatch, tmp_path: Path, capsys):
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    answers = iter(["4", "0"])
+    monkeypatch.setattr("builtins.input", lambda _="": next(answers))
+
+    code = run_menu(
+        _runtime(),
+        silent=False,
+        checker=FakeChecker(),
+        git_runner=FakeGitRunner(),
+        log_dir=log_dir,
+    )
+
+    output = capsys.readouterr().out
+    assert code == 0
+    assert "暂无日志" in output
 
 
 def test_run_menu_reloads_config_from_directory(monkeypatch, tmp_path: Path, capsys):
