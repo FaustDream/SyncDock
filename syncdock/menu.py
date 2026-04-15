@@ -17,6 +17,18 @@ def render_main_menu() -> str:
     )
 
 
+def handle_menu_choice(choice: str) -> str:
+    mapping = {
+        "1": "sync_all",
+        "2": "sync_one",
+        "3": "status",
+        "4": "recent_log",
+        "5": "reload_config",
+        "0": "exit",
+    }
+    return mapping.get(choice.strip(), "invalid")
+
+
 def run_menu(runtime: RuntimeConfig, *, silent: bool) -> int:
     if silent:
         return 0

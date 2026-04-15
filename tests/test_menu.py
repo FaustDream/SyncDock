@@ -10,3 +10,9 @@ def test_render_main_menu_contains_required_options():
     assert "4. 查看最近日志" in text
     assert "5. 重新加载配置" in text
     assert "0. 退出" in text
+
+
+def test_handle_menu_choice_returns_exit_for_zero():
+    from syncdock.menu import handle_menu_choice
+
+    assert handle_menu_choice("0") == "exit"
