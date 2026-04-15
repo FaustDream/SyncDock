@@ -20,3 +20,30 @@ def test_summarize_results_counts_each_outcome_type():
         "failed": 1,
         "invalid": 1,
     }
+
+
+class FakeChecker:
+    def inspect(self, repository, settings):
+        return {
+            "kind": "ready",
+            "needs_pull": False,
+        }
+
+
+def test_sync_single_repository_returns_up_to_date_when_pull_not_needed():
+    from syncdock.config_service import RepositoryConfig, SettingsConfig
+    from syncdock.sync_engine import sync_single_repository
+
+    repository = RepositoryConfig(name="SyncDock", path="E:\\gitHub\\SyncDock", enabled=True)
+    settings = SettingsConfig(
+        concurrent_limit=3,
+        command_timeout_seconds=120,
+        skip_uncommitted_changes=True,
+        skip_untracked_files=False,
+        log_retention_days=30,
+    )
+
+    result = sync_single_repository(repository, settings, checker=FakeChecker(), git_runner=None)
+
+    assert result.outcome == "UP_TO_DATE"
+    assert result.message == "已经是最新"
