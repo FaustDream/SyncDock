@@ -16,3 +16,28 @@ def test_handle_menu_choice_returns_exit_for_zero():
     from syncdock.menu import handle_menu_choice
 
     assert handle_menu_choice("0") == "exit"
+
+
+def test_run_menu_exits_only_after_zero(monkeypatch, capsys):
+    from syncdock.config_service import RuntimeConfig, RepositoryConfig, SettingsConfig
+    from syncdock.menu import run_menu
+
+    runtime = RuntimeConfig(
+        repositories=[RepositoryConfig(name="SyncDock", path="E:\\gitHub\\SyncDock", enabled=True)],
+        settings=SettingsConfig(
+            concurrent_limit=3,
+            command_timeout_seconds=120,
+            skip_uncommitted_changes=True,
+            skip_untracked_files=False,
+            log_retention_days=30,
+        ),
+    )
+    answers = iter(["9", "0"])
+    monkeypatch.setattr("builtins.input", lambda _="": next(answers))
+
+    code = run_menu(runtime, silent=False)
+
+    output = capsys.readouterr().out
+    assert code == 0
+    assert "请输入有效选项" in output
+    assert output.count("SyncDock 4.0") == 2

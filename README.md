@@ -115,3 +115,23 @@ npm run tauri build
 
 MIT
 
+## SyncDock 4.0 CLI Usage
+
+### Install dependencies
+
+```powershell
+py -3 -m pip install -r requirements.txt
+```
+
+### Interactive mode
+
+```powershell
+.\run-sync.bat
+```
+
+### Silent mode
+
+```powershell
+.\run-sync-silent.bat
+```
+

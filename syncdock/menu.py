@@ -33,5 +33,12 @@ def run_menu(runtime: RuntimeConfig, *, silent: bool) -> int:
     if silent:
         return 0
 
-    print(render_main_menu())
-    return 0
+    while True:
+        print(render_main_menu())
+        action = handle_menu_choice(input("请选择: "))
+        if action == "exit":
+            return 0
+        if action == "invalid":
+            print("请输入有效选项")
+            continue
+        print("该功能正在接入中")
