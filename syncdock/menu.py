@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from syncdock.config_service import RuntimeConfig
 
 def render_main_menu() -> str:
     return "\n".join(
@@ -14,3 +15,11 @@ def render_main_menu() -> str:
             "0. 退出",
         ]
     )
+
+
+def run_menu(runtime: RuntimeConfig, *, silent: bool) -> int:
+    if silent:
+        return 0
+
+    print(render_main_menu())
+    return 0
