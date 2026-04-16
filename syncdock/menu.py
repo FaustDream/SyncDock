@@ -5,7 +5,22 @@ from pathlib import Path
 from syncdock.config_service import RuntimeConfig, load_runtime_config
 from syncdock.log_service import read_latest_log, render_result_line, render_summary, write_log_session
 from syncdock.repo_checker import RepositoryChecker
-from syncdock.sync_engine import GitCommandRunner, summarize_results, sync_all_repositories, sync_single_repository
+from syncdock.sync_engine import (
+    GitCommandRunner,
+    force_sync_single_repository,
+    summarize_results,
+    sync_all_repositories,
+    sync_single_repository,
+)
+
+
+def render_two_column_table(left_header: str, right_header: str, rows: list[tuple[str, str]]) -> str:
+    left_width = max(len(left_header), *(len(left) for left, _ in rows)) if rows else len(left_header)
+    right_width = max(len(right_header), *(len(right) for _, right in rows)) if rows else len(right_header)
+    border = f"+-{'-' * left_width}-+-{'-' * right_width}-+"
+    header = f"| {left_header.ljust(left_width)} | {right_header.ljust(right_width)} |"
+    body = [f"| {left.ljust(left_width)} | {right.ljust(right_width)} |" for left, right in rows]
+    return "\n".join([border, header, border, *body, border])
 
 
 def render_main_menu() -> str:
@@ -14,10 +29,11 @@ def render_main_menu() -> str:
             "SyncDock 4.0",
             "",
             "1. 同步全部仓库",
-            "2. 同步指定仓库",
+            "2. 同步指定仓库（可多选）",
             "3. 查看仓库状态",
             "4. 查看最近日志",
             "5. 重新加载配置",
+            "6. 强制同步指定仓库（可多选）",
             "0. 退出",
         ]
     )
@@ -26,13 +42,33 @@ def render_main_menu() -> str:
 def handle_menu_choice(choice: str) -> str:
     mapping = {
         "1": "sync_all",
-        "2": "sync_one",
+        "2": "sync_selected",
         "3": "status",
         "4": "recent_log",
         "5": "reload_config",
+        "6": "force_sync_selected",
         "0": "exit",
     }
     return mapping.get(choice.strip(), "invalid")
+
+
+def parse_repository_selection(raw_choice: str, repository_count: int) -> list[int]:
+    raw_tokens = raw_choice.replace(",", " ").split()
+    if not raw_tokens:
+        raise ValueError("请选择至少一个仓库编号")
+
+    indices: list[int] = []
+    seen: set[int] = set()
+    for token in raw_tokens:
+        if not token.isdigit():
+            raise ValueError("请输入有效编号，多个编号可用空格或逗号分隔")
+        selected_index = int(token) - 1
+        if selected_index < 0 or selected_index >= repository_count:
+            raise ValueError("输入的仓库编号超出范围")
+        if selected_index not in seen:
+            indices.append(selected_index)
+            seen.add(selected_index)
+    return indices
 
 
 def _print_sync_results(results, log_dir: Path | None) -> None:
@@ -50,35 +86,55 @@ def _sync_all(runtime: RuntimeConfig, checker, git_runner, log_dir: Path | None)
     _print_sync_results(results, log_dir)
 
 
-def _sync_one(runtime: RuntimeConfig, checker, git_runner, log_dir: Path | None) -> None:
+def _select_enabled_repositories(runtime: RuntimeConfig) -> list:
     enabled = [item for item in runtime.repositories if item.enabled]
     if not enabled:
         print("没有可同步的仓库")
+        return []
+
+    rows = [(str(index), repository.name) for index, repository in enumerate(enabled, start=1)]
+    print(render_two_column_table("序号", "仓库", rows))
+    return enabled
+
+
+def _sync_selected(runtime: RuntimeConfig, checker, git_runner, log_dir: Path | None, *, force: bool) -> None:
+    enabled = _select_enabled_repositories(runtime)
+    if not enabled:
         return
 
-    for index, repository in enumerate(enabled, start=1):
-        print(f"{index}. {repository.name}")
-
-    raw_choice = input("请选择仓库编号: ").strip()
-    if not raw_choice.isdigit():
-        print("请输入有效编号")
+    prompt = "请输入仓库编号，多个编号可用空格或逗号分隔: "
+    raw_choice = input(prompt).strip()
+    try:
+        selected_indices = parse_repository_selection(raw_choice, len(enabled))
+    except ValueError as error:
+        print(str(error))
         return
 
-    selected_index = int(raw_choice) - 1
-    if selected_index < 0 or selected_index >= len(enabled):
-        print("请输入有效编号")
-        return
+    results = []
+    for index in selected_indices:
+        repository = enabled[index]
+        if force:
+            result = force_sync_single_repository(repository, runtime.settings, checker=checker, git_runner=git_runner)
+        else:
+            result = sync_single_repository(repository, runtime.settings, checker=checker, git_runner=git_runner)
+        results.append(result)
 
-    result = sync_single_repository(enabled[selected_index], runtime.settings, checker=checker, git_runner=git_runner)
-    _print_sync_results([result], log_dir)
+    _print_sync_results(results, log_dir)
 
 
 def _show_status(runtime: RuntimeConfig, checker) -> None:
+    rows: list[tuple[str, str]] = []
     for repository in runtime.repositories:
         if not repository.enabled:
             continue
         inspection = checker.inspect(repository, runtime.settings)
-        print(f"{repository.name}: {inspection['message']}")
+        rows.append((repository.name, inspection["message"]))
+
+    if not rows:
+        print("没有可查看状态的仓库")
+        return
+
+    print(render_two_column_table("仓库", "状态", rows))
 
 
 def run_menu(
@@ -109,8 +165,11 @@ def run_menu(
         if action == "sync_all":
             _sync_all(current_runtime, checker, git_runner, log_dir)
             continue
-        if action == "sync_one":
-            _sync_one(current_runtime, checker, git_runner, log_dir)
+        if action == "sync_selected":
+            _sync_selected(current_runtime, checker, git_runner, log_dir, force=False)
+            continue
+        if action == "force_sync_selected":
+            _sync_selected(current_runtime, checker, git_runner, log_dir, force=True)
             continue
         if action == "status":
             _show_status(current_runtime, checker)

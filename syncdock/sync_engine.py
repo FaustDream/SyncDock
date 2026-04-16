@@ -99,7 +99,44 @@ def sync_single_repository(repository: RepositoryConfig, settings: SettingsConfi
     if not pull_ok:
         return SyncResult(repository.name, "FAILED", pull_message)
 
-    return SyncResult(repository.name, "UPDATED", "已拉取最新代码")
+    return SyncResult(repository.name, "UPDATED", "已拉取远端最新代码")
+
+
+def force_sync_single_repository(repository: RepositoryConfig, settings: SettingsConfig, *, checker, git_runner) -> SyncResult:
+    inspection = checker.inspect(repository, settings)
+
+    if inspection["kind"] == "invalid":
+        return SyncResult(repository.name, "INVALID", inspection["message"])
+    if inspection["kind"] == "skipped":
+        return SyncResult(repository.name, "SKIPPED", inspection["message"])
+    if inspection["kind"] == "failed":
+        return SyncResult(repository.name, "FAILED", inspection["message"])
+
+    fetch_ok, fetch_message = git_runner.run(
+        repository.path,
+        ["fetch", "--all", "--prune"],
+        settings.command_timeout_seconds,
+    )
+    if not fetch_ok:
+        return SyncResult(repository.name, "FAILED", fetch_message)
+
+    reset_ok, reset_message = git_runner.run(
+        repository.path,
+        ["reset", "--hard", "@{upstream}"],
+        settings.command_timeout_seconds,
+    )
+    if not reset_ok:
+        return SyncResult(repository.name, "FAILED", reset_message)
+
+    clean_ok, clean_message = git_runner.run(
+        repository.path,
+        ["clean", "-fd"],
+        settings.command_timeout_seconds,
+    )
+    if not clean_ok:
+        return SyncResult(repository.name, "FAILED", clean_message)
+
+    return SyncResult(repository.name, "UPDATED", "已强制同步到远端最新状态")
 
 
 def sync_all_repositories(
