@@ -4,6 +4,7 @@ from pathlib import Path
 
 from syncdock.config_service import RuntimeConfig, load_runtime_config
 from syncdock.log_service import read_latest_log, render_result_line, render_summary, write_log_session
+from syncdock.progress import create_progress_bar
 from syncdock.repo_checker import RepositoryChecker
 from syncdock.sync_engine import (
     GitCommandRunner,
@@ -81,8 +82,16 @@ def _print_sync_results(results, log_dir: Path | None) -> None:
         write_log_session(log_dir, lines + ["", summary])
 
 
-def _sync_all(runtime: RuntimeConfig, checker, git_runner, log_dir: Path | None) -> None:
-    results = sync_all_repositories(runtime.repositories, runtime.settings, checker=checker, git_runner=git_runner)
+def _sync_all(runtime: RuntimeConfig, checker, git_runner, log_dir: Path | None, *, progress_factory=create_progress_bar) -> None:
+    enabled_count = sum(1 for item in runtime.repositories if item.enabled)
+    progress = progress_factory("同步进度", enabled_count) if enabled_count else None
+    results = sync_all_repositories(
+        runtime.repositories,
+        runtime.settings,
+        checker=checker,
+        git_runner=git_runner,
+        progress_callback=(lambda result: progress.advance(f"已完成：{result.name}")) if progress else None,
+    )
     _print_sync_results(results, log_dir)
 
 
@@ -97,7 +106,38 @@ def _select_enabled_repositories(runtime: RuntimeConfig) -> list:
     return enabled
 
 
-def _sync_selected(runtime: RuntimeConfig, checker, git_runner, log_dir: Path | None, *, force: bool) -> None:
+def _sync_repositories_with_progress(
+    repositories: list,
+    settings,
+    *,
+    checker,
+    git_runner,
+    force: bool,
+    progress_factory=create_progress_bar,
+) -> list:
+    progress_title = "强制同步进度" if force else "同步进度"
+    progress = progress_factory(progress_title, len(repositories)) if repositories else None
+    results = []
+    for repository in repositories:
+        if force:
+            result = force_sync_single_repository(repository, settings, checker=checker, git_runner=git_runner)
+        else:
+            result = sync_single_repository(repository, settings, checker=checker, git_runner=git_runner)
+        results.append(result)
+        if progress is not None:
+            progress.advance(f"已完成：{repository.name}")
+    return results
+
+
+def _sync_selected(
+    runtime: RuntimeConfig,
+    checker,
+    git_runner,
+    log_dir: Path | None,
+    *,
+    force: bool,
+    progress_factory=create_progress_bar,
+) -> None:
     enabled = _select_enabled_repositories(runtime)
     if not enabled:
         return
@@ -110,26 +150,33 @@ def _sync_selected(runtime: RuntimeConfig, checker, git_runner, log_dir: Path | 
         print(str(error))
         return
 
-    results = []
-    for index in selected_indices:
-        repository = enabled[index]
-        if force:
-            result = force_sync_single_repository(repository, runtime.settings, checker=checker, git_runner=git_runner)
-        else:
-            result = sync_single_repository(repository, runtime.settings, checker=checker, git_runner=git_runner)
-        results.append(result)
+    selected_repositories = [enabled[index] for index in selected_indices]
+    results = _sync_repositories_with_progress(
+        selected_repositories,
+        runtime.settings,
+        checker=checker,
+        git_runner=git_runner,
+        force=force,
+        progress_factory=progress_factory,
+    )
 
     _print_sync_results(results, log_dir)
 
 
-def _show_status(runtime: RuntimeConfig, checker) -> None:
+def _collect_status_rows(runtime: RuntimeConfig, checker, *, progress_factory=create_progress_bar) -> list[tuple[str, str]]:
+    enabled = [repository for repository in runtime.repositories if repository.enabled]
+    progress = progress_factory("查询仓库状态", len(enabled)) if enabled else None
     rows: list[tuple[str, str]] = []
-    for repository in runtime.repositories:
-        if not repository.enabled:
-            continue
+    for repository in enabled:
         inspection = checker.inspect(repository, runtime.settings)
         rows.append((repository.name, inspection["message"]))
+        if progress is not None:
+            progress.advance(f"已完成：{repository.name}")
+    return rows
 
+
+def _show_status(runtime: RuntimeConfig, checker, *, progress_factory=create_progress_bar) -> None:
+    rows = _collect_status_rows(runtime, checker, progress_factory=progress_factory)
     if not rows:
         print("没有可查看状态的仓库")
         return

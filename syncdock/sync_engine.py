@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 import subprocess
 
@@ -145,17 +145,24 @@ def sync_all_repositories(
     *,
     checker,
     git_runner,
+    progress_callback=None,
 ) -> list[SyncResult]:
     enabled = [item for item in repositories if item.enabled]
+    results: list[SyncResult | None] = [None] * len(enabled)
     with ThreadPoolExecutor(max_workers=settings.concurrent_limit) as pool:
-        futures = [
+        future_to_index = {
             pool.submit(
                 sync_single_repository,
                 repository,
                 settings,
                 checker=checker,
                 git_runner=git_runner,
-            )
-            for repository in enabled
-        ]
-        return [future.result() for future in futures]
+            ): index
+            for index, repository in enumerate(enabled)
+        }
+        for future in as_completed(future_to_index):
+            result = future.result()
+            results[future_to_index[future]] = result
+            if progress_callback is not None:
+                progress_callback(result)
+    return [item for item in results if item is not None]

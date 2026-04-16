@@ -4,6 +4,17 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 
+from syncdock.progress import create_progress_bar
+
+
+DEFAULT_SETTINGS = {
+    "concurrent_limit": 3,
+    "command_timeout_seconds": 120,
+    "skip_uncommitted_changes": True,
+    "skip_untracked_files": False,
+    "log_retention_days": 30,
+}
+
 
 @dataclass(slots=True)
 class RepositoryConfig:
@@ -31,7 +42,58 @@ def _read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def load_runtime_config(config_dir: Path) -> RuntimeConfig:
+def _write_json(path: Path, content: dict) -> None:
+    path.write_text(json.dumps(content, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _build_default_repositories(config_dir: Path) -> dict:
+    project_root = config_dir.resolve().parent
+    repository_name = project_root.name or "SyncDock"
+    return {
+        "repositories": [
+            {
+                "name": repository_name,
+                "path": str(project_root),
+                "enabled": True,
+            }
+        ]
+    }
+
+
+def _ensure_default_config(config_dir: Path, *, progress_factory=create_progress_bar) -> None:
+    repositories_path = config_dir / "repositories.json"
+    settings_path = config_dir / "settings.json"
+
+    pending_steps: list[tuple[str, Path]] = []
+    if not config_dir.exists():
+        pending_steps.append(("config_dir", config_dir))
+    if not repositories_path.exists():
+        pending_steps.append(("repositories", repositories_path))
+    if not settings_path.exists():
+        pending_steps.append(("settings", settings_path))
+
+    if not pending_steps:
+        return
+
+    progress = progress_factory("首次初始化配置", len(pending_steps))
+    for step_kind, target in pending_steps:
+        if step_kind == "config_dir":
+            config_dir.mkdir(parents=True, exist_ok=True)
+            progress.advance(f"已创建目录：{target.name}")
+            continue
+        if step_kind == "repositories":
+            config_dir.mkdir(parents=True, exist_ok=True)
+            _write_json(target, _build_default_repositories(config_dir))
+            progress.advance(f"已创建默认文件：{target.name}")
+            continue
+
+        config_dir.mkdir(parents=True, exist_ok=True)
+        _write_json(target, DEFAULT_SETTINGS)
+        progress.advance(f"已创建默认文件：{target.name}")
+
+
+def load_runtime_config(config_dir: Path, *, progress_factory=create_progress_bar) -> RuntimeConfig:
+    _ensure_default_config(config_dir, progress_factory=progress_factory)
     repositories_raw = _read_json(config_dir / "repositories.json")
     settings_raw = _read_json(config_dir / "settings.json")
 
