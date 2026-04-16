@@ -1,7 +1,0 @@
-{
-  "concurrent_limit": 3,
-  "command_timeout_seconds": 120,
-  "skip_uncommitted_changes": true,
-  "skip_untracked_files": false,
-  "log_retention_days": 30
-}
