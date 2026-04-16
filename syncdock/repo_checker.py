@@ -34,7 +34,14 @@ def parse_status_lines(lines: list[str]) -> RepoStatus:
 
 
 class RepositoryChecker:
-    def inspect(self, repository: RepositoryConfig, settings: SettingsConfig) -> dict:
+    def inspect(
+        self,
+        repository: RepositoryConfig,
+        settings: SettingsConfig,
+        *,
+        ignore_uncommitted_changes: bool = False,
+        ignore_untracked_files: bool = False,
+    ) -> dict:
         path = Path(repository.path)
         if not path.exists():
             return {
@@ -62,13 +69,17 @@ class RepositoryChecker:
         status_result = self._run_git(path, "status", "--porcelain")
         lines = status_result.stdout.splitlines() if status_result else []
         parsed_status = parse_status_lines(lines)
-        if settings.skip_uncommitted_changes and parsed_status.has_uncommitted_changes:
+        if (
+            settings.skip_uncommitted_changes
+            and not ignore_uncommitted_changes
+            and parsed_status.has_uncommitted_changes
+        ):
             return {
                 "kind": "skipped",
                 "message": "已跳过，有未提交修改",
                 "needs_pull": False,
             }
-        if settings.skip_untracked_files and parsed_status.has_untracked_files:
+        if settings.skip_untracked_files and not ignore_untracked_files and parsed_status.has_untracked_files:
             return {
                 "kind": "skipped",
                 "message": "已跳过，有未跟踪文件",

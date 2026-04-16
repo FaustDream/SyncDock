@@ -103,7 +103,12 @@ def sync_single_repository(repository: RepositoryConfig, settings: SettingsConfi
 
 
 def force_sync_single_repository(repository: RepositoryConfig, settings: SettingsConfig, *, checker, git_runner) -> SyncResult:
-    inspection = checker.inspect(repository, settings)
+    inspection = checker.inspect(
+        repository,
+        settings,
+        ignore_uncommitted_changes=True,
+        ignore_untracked_files=True,
+    )
 
     if inspection["kind"] == "invalid":
         return SyncResult(repository.name, "INVALID", inspection["message"])

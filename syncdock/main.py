@@ -14,18 +14,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
-    project_root = Path(__file__).resolve().parent.parent
-    config_dir = project_root / "config"
-    log_dir = project_root / "logs"
     try:
+        args = parse_args(argv)
+        project_root = Path(__file__).resolve().parent.parent
+        config_dir = project_root / "config"
+        log_dir = project_root / "logs"
         runtime = load_runtime_config(config_dir)
+        if args.silent:
+            return run_menu(runtime, silent=True, config_dir=config_dir, log_dir=log_dir)
+        return run_menu(runtime, silent=False, config_dir=config_dir, log_dir=log_dir)
+    except KeyboardInterrupt:
+        print("\n操作已取消")
+        return 1
     except (OSError, ValueError) as error:
         print(f"配置加载失败：{error}")
         return 1
-    if args.silent:
-        return run_menu(runtime, silent=True, config_dir=config_dir, log_dir=log_dir)
-    return run_menu(runtime, silent=False, config_dir=config_dir, log_dir=log_dir)
+    except Exception as error:
+        print(f"程序运行失败：{error}")
+        return 1
 
 
 if __name__ == "__main__":

@@ -59,16 +59,44 @@ def write_log_session(
     return log_file
 
 
-def read_latest_log(log_dir: Path) -> str:
+def _get_latest_log_file(log_dir: Path) -> Path | None:
     if not log_dir.exists():
-        return "暂无日志"
+        return None
 
     log_files = sorted(log_dir.glob("*.log"))
     if not log_files:
-        return "暂无日志"
+        return None
+    return log_files[-1]
 
-    latest_log = log_files[-1]
+
+def extract_failed_log_lines(content: str) -> list[str]:
+    failed_lines: list[str] = []
+    for line in content.splitlines():
+        if ": " not in line:
+            continue
+        _, message = line.split(": ", 1)
+        if message.startswith("同步失败"):
+            failed_lines.append(line)
+    return failed_lines
+
+
+def read_latest_log(log_dir: Path) -> str:
+    latest_log = _get_latest_log_file(log_dir)
+    if latest_log is None:
+        return "暂无日志"
     content = latest_log.read_text(encoding="utf-8").strip()
     if not content:
         return f"最近日志：{latest_log.name}"
     return f"最近日志：{latest_log.name}\n\n{content}"
+
+
+def read_latest_failed_log(log_dir: Path) -> str:
+    latest_log = _get_latest_log_file(log_dir)
+    if latest_log is None:
+        return "暂无日志"
+
+    content = latest_log.read_text(encoding="utf-8").strip()
+    failed_lines = extract_failed_log_lines(content)
+    if not failed_lines:
+        return f"最近日志：{latest_log.name}\n\n最近一次同步没有失败仓库"
+    return f"最近日志：{latest_log.name}\n\n" + "\n".join(failed_lines)

@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from syncdock.config_service import RuntimeConfig, load_runtime_config
-from syncdock.log_service import read_latest_log, render_result_line, render_summary, write_log_session
+from syncdock.log_service import read_latest_failed_log, read_latest_log, render_result_line, render_summary, write_log_session
 from syncdock.progress import create_progress_bar
 from syncdock.repo_checker import RepositoryChecker
 from syncdock.sync_engine import (
@@ -33,8 +33,9 @@ def render_main_menu() -> str:
             "2. 同步指定仓库（可多选）",
             "3. 查看仓库状态",
             "4. 查看最近日志",
-            "5. 重新加载配置",
-            "6. 强制同步指定仓库（可多选）",
+            "5. 查看最近失败仓库",
+            "6. 重新加载配置",
+            "7. 强制同步指定仓库（可多选）",
             "0. 退出",
         ]
     )
@@ -46,8 +47,9 @@ def handle_menu_choice(choice: str) -> str:
         "2": "sync_selected",
         "3": "status",
         "4": "recent_log",
-        "5": "reload_config",
-        "6": "force_sync_selected",
+        "5": "recent_failed_log",
+        "6": "reload_config",
+        "7": "force_sync_selected",
         "0": "exit",
     }
     return mapping.get(choice.strip(), "invalid")
@@ -209,31 +211,40 @@ def run_menu(
         if action == "invalid":
             print("请输入有效选项")
             continue
-        if action == "sync_all":
-            _sync_all(current_runtime, checker, git_runner, log_dir)
-            continue
-        if action == "sync_selected":
-            _sync_selected(current_runtime, checker, git_runner, log_dir, force=False)
-            continue
-        if action == "force_sync_selected":
-            _sync_selected(current_runtime, checker, git_runner, log_dir, force=True)
-            continue
-        if action == "status":
-            _show_status(current_runtime, checker)
-            continue
-        if action == "recent_log":
-            if log_dir is None:
-                print("暂无日志")
-            else:
-                print(read_latest_log(log_dir))
-            continue
-        if action == "reload_config":
-            if config_dir is None:
-                print("当前无法重新加载配置")
-            else:
-                try:
-                    current_runtime = load_runtime_config(config_dir)
-                except (OSError, ValueError) as error:
-                    print(f"重新加载配置失败：{error}")
+        try:
+            if action == "sync_all":
+                _sync_all(current_runtime, checker, git_runner, log_dir)
+                continue
+            if action == "sync_selected":
+                _sync_selected(current_runtime, checker, git_runner, log_dir, force=False)
+                continue
+            if action == "force_sync_selected":
+                _sync_selected(current_runtime, checker, git_runner, log_dir, force=True)
+                continue
+            if action == "status":
+                _show_status(current_runtime, checker)
+                continue
+            if action == "recent_log":
+                if log_dir is None:
+                    print("暂无日志")
                 else:
-                    print("配置已重新加载")
+                    print(read_latest_log(log_dir))
+                continue
+            if action == "recent_failed_log":
+                if log_dir is None:
+                    print("暂无日志")
+                else:
+                    print(read_latest_failed_log(log_dir))
+                continue
+            if action == "reload_config":
+                if config_dir is None:
+                    print("当前无法重新加载配置")
+                else:
+                    try:
+                        current_runtime = load_runtime_config(config_dir)
+                    except (OSError, ValueError) as error:
+                        print(f"重新加载配置失败：{error}")
+                    else:
+                        print("配置已重新加载")
+        except Exception as error:
+            print(f"操作执行失败：{error}")
