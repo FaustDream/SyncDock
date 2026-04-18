@@ -21,6 +21,11 @@ class RepositoryConfig:
     name: str
     path: str
     enabled: bool
+    author_type: bool = True
+
+    @property
+    def uses_force_sync(self) -> bool:
+        return not self.author_type
 
 
 @dataclass(slots=True)
@@ -55,6 +60,7 @@ def _build_default_repositories(config_dir: Path) -> dict:
                 "name": repository_name,
                 "path": str(project_root),
                 "enabled": True,
+                "author_type": True,
             }
         ]
     }
@@ -101,20 +107,34 @@ def load_runtime_config(config_dir: Path, *, progress_factory=create_progress_ba
     for item in repositories_raw.get("repositories", []):
         name = item["name"].strip()
         path = item["path"].strip()
+        raw_author_type = item.get("author_type", True)
+        if isinstance(raw_author_type, bool):
+            author_type = raw_author_type
+        else:
+            normalized_author_type = str(raw_author_type).strip().lower()
+            if normalized_author_type == "self":
+                author_type = True
+            elif normalized_author_type == "other":
+                author_type = False
+            else:
+                author_type = None
         if not name:
-            raise ValueError("Repository name cannot be empty")
+            raise ValueError("仓库名称不能为空")
         if not path:
-            raise ValueError(f"Repository path cannot be empty: {item!r}")
+            raise ValueError(f"仓库路径不能为空：{item!r}")
+        if author_type is None:
+            raise ValueError(f"仓库作者类型只能是布尔值 true/false：{item!r}")
         repositories.append(
             RepositoryConfig(
                 name=name,
                 path=path,
                 enabled=bool(item.get("enabled", True)),
+                author_type=author_type,
             )
         )
 
     if not repositories:
-        raise ValueError("At least one repository must be configured")
+        raise ValueError("至少需要配置一个仓库")
 
     settings = SettingsConfig(
         concurrent_limit=max(1, int(settings_raw["concurrent_limit"])),

@@ -37,6 +37,7 @@ def test_load_runtime_config_creates_missing_default_files(tmp_path) -> None:
     assert runtime.repositories[0].name == tmp_path.name
     assert runtime.repositories[0].path == str(tmp_path.resolve())
     assert runtime.repositories[0].enabled is True
+    assert runtime.repositories[0].author_type is True
     assert runtime.settings.concurrent_limit == 3
     assert created[0].title == "首次初始化配置"
     assert created[0].total == 3
@@ -59,6 +60,7 @@ def test_load_runtime_config_keeps_existing_files(tmp_path) -> None:
                         "name": "现有仓库",
                         "path": "D:\\gitHub\\existing",
                         "enabled": False,
+                        "author_type": False,
                     }
                 ]
             },
@@ -88,6 +90,7 @@ def test_load_runtime_config_keeps_existing_files(tmp_path) -> None:
     assert runtime.repositories[0].name == "现有仓库"
     assert runtime.repositories[0].path == "D:\\gitHub\\existing"
     assert runtime.repositories[0].enabled is False
+    assert runtime.repositories[0].author_type is False
     assert runtime.settings.concurrent_limit == 5
     assert runtime.settings.command_timeout_seconds == 240
     assert runtime.settings.skip_uncommitted_changes is False

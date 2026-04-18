@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from pathlib import Path
+import re
 
+from syncdock.advice_service import append_sync_suggestion
 from syncdock.sync_engine import SyncResult
 
 
@@ -69,15 +71,44 @@ def _get_latest_log_file(log_dir: Path) -> Path | None:
     return log_files[-1]
 
 
-def extract_failed_log_lines(content: str) -> list[str]:
-    failed_lines: list[str] = []
+def _get_recent_log_files(log_dir: Path, limit: int) -> list[Path]:
+    if not log_dir.exists() or limit <= 0:
+        return []
+    return list(reversed(sorted(log_dir.glob("*.log"))[-limit:]))
+
+
+def _normalize_failed_reason(message: str) -> str:
+    reason = message.strip()
+    if reason.startswith("同步失败"):
+        reason = reason[len("同步失败") :].lstrip("，,:：- ")
+
+    reason = re.sub(r"\s*[:：]\s*(fatal|traceback|stderr|stdout|exception|error)\b.*$", "", reason, flags=re.IGNORECASE)
+    reason = re.sub(r"\s*[\(（]\s*(fatal|traceback|stderr|stdout|exception|error)\b.*$", "", reason, flags=re.IGNORECASE)
+    reason = reason.strip(" ，,:：-")
+    return reason or "未知原因"
+
+
+def list_failed_repositories(content: str) -> list[tuple[str, str]]:
+    failed_items: list[tuple[str, str]] = []
     for line in content.splitlines():
         if ": " not in line:
             continue
-        _, message = line.split(": ", 1)
+        repository_name, message = line.split(": ", 1)
         if message.startswith("同步失败"):
-            failed_lines.append(line)
-    return failed_lines
+            failed_items.append((repository_name, _normalize_failed_reason(message)))
+    return failed_items
+
+
+def extract_failed_log_lines(content: str) -> list[str]:
+    return [f"{repository_name}: {append_sync_suggestion(reason)}" for repository_name, reason in list_failed_repositories(content)]
+
+
+def list_latest_failed_repositories(log_dir: Path) -> list[tuple[str, str]]:
+    latest_log = _get_latest_log_file(log_dir)
+    if latest_log is None:
+        return []
+    content = latest_log.read_text(encoding="utf-8").strip()
+    return list_failed_repositories(content)
 
 
 def read_latest_log(log_dir: Path) -> str:
@@ -85,18 +116,26 @@ def read_latest_log(log_dir: Path) -> str:
     if latest_log is None:
         return "暂无日志"
     content = latest_log.read_text(encoding="utf-8").strip()
-    if not content:
-        return f"最近日志：{latest_log.name}"
-    return f"最近日志：{latest_log.name}\n\n{content}"
-
-
-def read_latest_failed_log(log_dir: Path) -> str:
-    latest_log = _get_latest_log_file(log_dir)
-    if latest_log is None:
-        return "暂无日志"
-
-    content = latest_log.read_text(encoding="utf-8").strip()
     failed_lines = extract_failed_log_lines(content)
     if not failed_lines:
         return f"最近日志：{latest_log.name}\n\n最近一次同步没有失败仓库"
     return f"最近日志：{latest_log.name}\n\n" + "\n".join(failed_lines)
+
+
+def read_latest_failed_log(log_dir: Path) -> str:
+    return read_latest_log(log_dir)
+
+
+def read_recent_logs(log_dir: Path, limit: int) -> str:
+    log_files = _get_recent_log_files(log_dir, limit)
+    if not log_files:
+        return "暂无日志"
+
+    sections = [f"最近 {len(log_files)} 次日志"]
+    for index, log_file in enumerate(log_files, start=1):
+        content = log_file.read_text(encoding="utf-8").strip()
+        failed_lines = extract_failed_log_lines(content)
+        body = "\n".join(failed_lines) if failed_lines else "最近一次同步没有失败仓库"
+        sections.append(f"{index}. {log_file.name}\n{body}")
+
+    return "\n\n".join(sections)

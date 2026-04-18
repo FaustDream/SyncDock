@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from syncdock.config_service import RepositoryConfig, SettingsConfig
-from syncdock.sync_engine import SyncResult, force_sync_single_repository, sync_all_repositories
+from syncdock.sync_engine import SyncResult, force_sync_single_repository, sync_all_repositories, sync_repository_by_policy
 
 
 def test_sync_all_repositories_reports_progress_for_each_enabled_repository(monkeypatch) -> None:
@@ -55,6 +55,7 @@ def test_force_sync_single_repository_ignores_workspace_change_checks() -> None:
             *,
             ignore_uncommitted_changes: bool = False,
             ignore_untracked_files: bool = False,
+            ignore_divergence: bool = False,
         ):
             if not ignore_uncommitted_changes or not ignore_untracked_files:
                 return {"kind": "skipped", "message": "已跳过，有本地改动", "needs_pull": False}
@@ -73,3 +74,56 @@ def test_force_sync_single_repository_ignores_workspace_change_checks() -> None:
         ["reset", "--hard", "@{upstream}"],
         ["clean", "-fd"],
     ]
+
+
+def test_sync_single_repository_reports_ahead_only_as_skipped() -> None:
+    repository = RepositoryConfig(name="仓库A", path="A", enabled=True)
+    settings = SettingsConfig(
+        concurrent_limit=2,
+        command_timeout_seconds=120,
+        skip_uncommitted_changes=True,
+        skip_untracked_files=False,
+        log_retention_days=30,
+    )
+
+    class Checker:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def inspect(self, repository, settings):
+            self.calls += 1
+            if self.calls == 1:
+                return {"kind": "ready", "message": "已经是最新", "needs_pull": False, "status_code": "up_to_date"}
+            return {"kind": "ready", "message": "本地有未推送提交", "needs_pull": False, "status_code": "ahead_only"}
+
+    class GitRunner:
+        def run(self, cwd: str, args: list[str], timeout_seconds: int):
+            return True, "ok"
+
+    result = sync_repository_by_policy(repository, settings, checker=Checker(), git_runner=GitRunner())
+
+    assert result == SyncResult("仓库A", "SKIPPED", "本地有未推送提交")
+
+
+def test_sync_repository_by_policy_uses_force_sync_for_other_author(monkeypatch) -> None:
+    repository = RepositoryConfig(name="仓库A", path="A", enabled=True, author_type=False)
+    settings = SettingsConfig(
+        concurrent_limit=2,
+        command_timeout_seconds=120,
+        skip_uncommitted_changes=True,
+        skip_untracked_files=False,
+        log_retention_days=30,
+    )
+
+    monkeypatch.setattr(
+        "syncdock.sync_engine.sync_single_repository",
+        lambda repository, settings, *, checker, git_runner: SyncResult(repository.name, "UPDATED", "安全同步"),
+    )
+    monkeypatch.setattr(
+        "syncdock.sync_engine.force_sync_single_repository",
+        lambda repository, settings, *, checker, git_runner: SyncResult(repository.name, "UPDATED", "强制同步"),
+    )
+
+    result = sync_repository_by_policy(repository, settings, checker=object(), git_runner=object())
+
+    assert result == SyncResult("仓库A", "UPDATED", "强制同步")

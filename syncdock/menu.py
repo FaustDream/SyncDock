@@ -3,15 +3,23 @@ from __future__ import annotations
 from pathlib import Path
 
 from syncdock.config_service import RuntimeConfig, load_runtime_config
-from syncdock.log_service import read_latest_failed_log, read_latest_log, render_result_line, render_summary, write_log_session
+from syncdock.log_service import (
+    list_latest_failed_repositories,
+    read_latest_log,
+    read_recent_logs,
+    render_result_line,
+    render_summary,
+    write_log_session,
+)
 from syncdock.progress import create_progress_bar
-from syncdock.repo_checker import RepositoryChecker
+from syncdock.repo_checker import RepositoryChecker, format_status_detail
 from syncdock.sync_engine import (
     GitCommandRunner,
     force_sync_single_repository,
     summarize_results,
     sync_all_repositories,
     sync_single_repository,
+    SyncResult,
 )
 
 
@@ -24,6 +32,17 @@ def render_two_column_table(left_header: str, right_header: str, rows: list[tupl
     return "\n".join([border, header, border, *body, border])
 
 
+def _sort_repositories_for_display(repositories: list) -> list:
+    return sorted(
+        repositories,
+        key=lambda repository: (
+            0 if repository.author_type else 1,
+            repository.name.casefold(),
+            repository.name,
+        ),
+    )
+
+
 def render_main_menu() -> str:
     return "\n".join(
         [
@@ -32,10 +51,12 @@ def render_main_menu() -> str:
             "1. 同步全部仓库",
             "2. 同步指定仓库（可多选）",
             "3. 查看仓库状态",
-            "4. 查看最近日志",
-            "5. 查看最近失败仓库",
-            "6. 重新加载配置",
-            "7. 强制同步指定仓库（可多选）",
+            "4. 查看最近失败原因",
+            "5. 仅同步需要同步的仓库",
+            "6. 重试最近失败仓库",
+            "7. 查看最近 N 次日志",
+            "8. 重新加载配置",
+            "9. 强制同步指定仓库（可多选）",
             "0. 退出",
         ]
     )
@@ -47,9 +68,11 @@ def handle_menu_choice(choice: str) -> str:
         "2": "sync_selected",
         "3": "status",
         "4": "recent_log",
-        "5": "recent_failed_log",
-        "6": "reload_config",
-        "7": "force_sync_selected",
+        "5": "sync_needed_only",
+        "6": "retry_recent_failed",
+        "7": "recent_logs",
+        "8": "reload_config",
+        "9": "force_sync_selected",
         "0": "exit",
     }
     return mapping.get(choice.strip(), "invalid")
@@ -98,7 +121,7 @@ def _sync_all(runtime: RuntimeConfig, checker, git_runner, log_dir: Path | None,
 
 
 def _select_enabled_repositories(runtime: RuntimeConfig) -> list:
-    enabled = [item for item in runtime.repositories if item.enabled]
+    enabled = _sort_repositories_for_display([item for item in runtime.repositories if item.enabled])
     if not enabled:
         print("没有可同步的仓库")
         return []
@@ -114,17 +137,25 @@ def _sync_repositories_with_progress(
     *,
     checker,
     git_runner,
-    force: bool,
+    mode: str | None = None,
+    force: bool | None = None,
     progress_factory=create_progress_bar,
 ) -> list:
-    progress_title = "强制同步进度" if force else "同步进度"
+    if mode is None:
+        mode = "force" if force else "auto"
+    progress_title = "强制同步进度" if mode == "force" else "同步进度"
     progress = progress_factory(progress_title, len(repositories)) if repositories else None
     results = []
     for repository in repositories:
-        if force:
+        if mode == "force":
             result = force_sync_single_repository(repository, settings, checker=checker, git_runner=git_runner)
-        else:
+        elif mode == "safe":
             result = sync_single_repository(repository, settings, checker=checker, git_runner=git_runner)
+        else:
+            if repository.uses_force_sync:
+                result = force_sync_single_repository(repository, settings, checker=checker, git_runner=git_runner)
+            else:
+                result = sync_single_repository(repository, settings, checker=checker, git_runner=git_runner)
         results.append(result)
         if progress is not None:
             progress.advance(f"已完成：{repository.name}")
@@ -137,7 +168,8 @@ def _sync_selected(
     git_runner,
     log_dir: Path | None,
     *,
-    force: bool,
+    mode: str | None = None,
+    force: bool | None = None,
     progress_factory=create_progress_bar,
 ) -> None:
     enabled = _select_enabled_repositories(runtime)
@@ -158,6 +190,7 @@ def _sync_selected(
         runtime.settings,
         checker=checker,
         git_runner=git_runner,
+        mode=mode,
         force=force,
         progress_factory=progress_factory,
     )
@@ -165,13 +198,137 @@ def _sync_selected(
     _print_sync_results(results, log_dir)
 
 
+def _inspection_to_result(repository, inspection: dict) -> SyncResult:
+    outcome_map = {
+        "invalid": "INVALID",
+        "skipped": "SKIPPED",
+        "failed": "FAILED",
+    }
+    return SyncResult(repository.name, outcome_map[inspection["kind"]], inspection["message"])
+
+
+def _inspect_repository_for_sync(repository, settings, checker) -> dict:
+    try:
+        return checker.inspect(
+            repository,
+            settings,
+            refresh_remote=True,
+            ignore_uncommitted_changes=repository.uses_force_sync,
+            ignore_untracked_files=repository.uses_force_sync,
+            ignore_divergence=repository.uses_force_sync,
+        )
+    except TypeError:
+        return checker.inspect(repository, settings, refresh_remote=True)
+
+
+def _collect_repositories_needing_sync(runtime: RuntimeConfig, checker) -> tuple[list, list[SyncResult]]:
+    repositories: list = []
+    issue_results: list[SyncResult] = []
+
+    for repository in runtime.repositories:
+        if not repository.enabled:
+            continue
+        inspection = _inspect_repository_for_sync(repository, runtime.settings, checker)
+        if inspection["kind"] != "ready":
+            issue_results.append(_inspection_to_result(repository, inspection))
+            continue
+        if inspection["needs_pull"]:
+            repositories.append(repository)
+
+    return repositories, issue_results
+
+
+def _collect_retry_repositories(runtime: RuntimeConfig, names: list[str]) -> tuple[list, list[SyncResult]]:
+    repositories: list = []
+    issue_results: list[SyncResult] = []
+    indexed = {repository.name: repository for repository in runtime.repositories}
+
+    for name in names:
+        repository = indexed.get(name)
+        if repository is None:
+            issue_results.append(SyncResult(name, "INVALID", "仓库无效，当前配置中不存在"))
+            continue
+        if not repository.enabled:
+            issue_results.append(SyncResult(name, "SKIPPED", "已跳过，仓库未启用"))
+            continue
+        repositories.append(repository)
+
+    return repositories, issue_results
+
+
+def _sync_needed_only(
+    runtime: RuntimeConfig,
+    checker,
+    git_runner,
+    log_dir: Path | None,
+    *,
+    progress_factory=create_progress_bar,
+) -> None:
+    repositories, issue_results = _collect_repositories_needing_sync(runtime, checker)
+    if not repositories and not issue_results:
+        print("没有需要同步的仓库")
+        return
+
+    results = list(issue_results)
+    if repositories:
+        results.extend(
+            _sync_repositories_with_progress(
+                repositories,
+                runtime.settings,
+                checker=checker,
+                git_runner=git_runner,
+                mode="auto",
+                progress_factory=progress_factory,
+            )
+        )
+
+    _print_sync_results(results, log_dir)
+
+
+def _retry_recent_failed(
+    runtime: RuntimeConfig,
+    checker,
+    git_runner,
+    log_dir: Path | None,
+    *,
+    progress_factory=create_progress_bar,
+) -> None:
+    if log_dir is None:
+        print("暂无日志")
+        return
+
+    failed_repositories = list_latest_failed_repositories(log_dir)
+    if not failed_repositories:
+        print("最近一次同步没有失败仓库")
+        return
+
+    repositories, issue_results = _collect_retry_repositories(runtime, [name for name, _ in failed_repositories])
+    if not repositories and issue_results:
+        _print_sync_results(issue_results, log_dir)
+        return
+
+    results = list(issue_results)
+    if repositories:
+        results.extend(
+            _sync_repositories_with_progress(
+                repositories,
+                runtime.settings,
+                checker=checker,
+                git_runner=git_runner,
+                mode="auto",
+                progress_factory=progress_factory,
+            )
+        )
+    _print_sync_results(results, log_dir)
+
+
 def _collect_status_rows(runtime: RuntimeConfig, checker, *, progress_factory=create_progress_bar) -> list[tuple[str, str]]:
-    enabled = [repository for repository in runtime.repositories if repository.enabled]
+    enabled = _sort_repositories_for_display([repository for repository in runtime.repositories if repository.enabled])
     progress = progress_factory("查询仓库状态", len(enabled)) if enabled else None
     rows: list[tuple[str, str]] = []
     for repository in enabled:
-        inspection = checker.inspect(repository, runtime.settings)
-        rows.append((repository.name, inspection["message"]))
+        inspection = _inspect_repository_for_sync(repository, runtime.settings, checker)
+        rows.append((repository.name, format_status_detail(repository, inspection)))
         if progress is not None:
             progress.advance(f"已完成：{repository.name}")
     return rows
@@ -230,11 +387,21 @@ def run_menu(
                 else:
                     print(read_latest_log(log_dir))
                 continue
-            if action == "recent_failed_log":
+            if action == "sync_needed_only":
+                _sync_needed_only(current_runtime, checker, git_runner, log_dir)
+                continue
+            if action == "retry_recent_failed":
+                _retry_recent_failed(current_runtime, checker, git_runner, log_dir)
+                continue
+            if action == "recent_logs":
                 if log_dir is None:
                     print("暂无日志")
                 else:
-                    print(read_latest_failed_log(log_dir))
+                    raw_limit = input("请输入要查看的日志数量: ").strip()
+                    if not raw_limit.isdigit() or int(raw_limit) <= 0:
+                        print("请输入大于 0 的日志数量")
+                    else:
+                        print(read_recent_logs(log_dir, int(raw_limit)))
                 continue
             if action == "reload_config":
                 if config_dir is None:
