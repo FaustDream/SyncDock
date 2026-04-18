@@ -185,6 +185,8 @@ class RepositoryChecker:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=timeout_seconds,
             )
             return None
@@ -207,6 +209,8 @@ class RepositoryChecker:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
             )
         except subprocess.CalledProcessError:
             return None
