@@ -110,20 +110,16 @@ def load_runtime_config(config_dir: Path, *, progress_factory=create_progress_ba
         raw_author_type = item.get("author_type", True)
         if isinstance(raw_author_type, bool):
             author_type = raw_author_type
+        elif str(raw_author_type).strip().lower() == "self":
+            author_type = True
+        elif str(raw_author_type).strip().lower() == "other":
+            author_type = False
         else:
-            normalized_author_type = str(raw_author_type).strip().lower()
-            if normalized_author_type == "self":
-                author_type = True
-            elif normalized_author_type == "other":
-                author_type = False
-            else:
-                author_type = None
+            raise ValueError(f"author_type 只能是 true/false 或 \"self\"/\"other\"：{item!r}")
         if not name:
             raise ValueError("仓库名称不能为空")
         if not path:
             raise ValueError(f"仓库路径不能为空：{item!r}")
-        if author_type is None:
-            raise ValueError(f"仓库作者类型只能是布尔值 true/false：{item!r}")
         repositories.append(
             RepositoryConfig(
                 name=name,
