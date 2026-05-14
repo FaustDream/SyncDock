@@ -60,7 +60,7 @@ def _build_default_repositories(config_dir: Path) -> dict:
                 "name": repository_name,
                 "path": str(project_root),
                 "enabled": True,
-                "author_type": True,
+                "sync_policy": "safe",
             }
         ]
     }
@@ -107,15 +107,27 @@ def load_runtime_config(config_dir: Path, *, progress_factory=create_progress_ba
     for item in repositories_raw.get("repositories", []):
         name = item["name"].strip()
         path = item["path"].strip()
-        raw_author_type = item.get("author_type", True)
-        if isinstance(raw_author_type, bool):
-            author_type = raw_author_type
-        elif str(raw_author_type).strip().lower() == "self":
-            author_type = True
-        elif str(raw_author_type).strip().lower() == "other":
-            author_type = False
+
+        # 兼容新旧字段：优先使用 sync_policy，兜底 author_type
+        raw_sync_policy = item.get("sync_policy")
+        raw_author_type = item.get("author_type")
+        if raw_sync_policy is not None:
+            policy_str = str(raw_sync_policy).strip().lower()
+            if policy_str == "force":
+                author_type = False
+            else:
+                author_type = True  # "safe" 或任何无法识别的值默认 safe
+        elif raw_author_type is not None:
+            if isinstance(raw_author_type, bool):
+                author_type = raw_author_type
+            elif str(raw_author_type).strip().lower() == "self":
+                author_type = True
+            elif str(raw_author_type).strip().lower() == "other":
+                author_type = False
+            else:
+                raise ValueError(f"author_type 只能是 true/false 或 \"self\"/\"other\"：{item!r}")
         else:
-            raise ValueError(f"author_type 只能是 true/false 或 \"self\"/\"other\"：{item!r}")
+            author_type = True  # 默认 safe
         if not name:
             raise ValueError("仓库名称不能为空")
         if not path:

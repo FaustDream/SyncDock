@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>SyncDock 5.0</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:system-ui,-apple-system,sans-serif;background:#fff;color:#2C2C2A;font-size:13px;line-height:1.5;padding:0}
+
+/* Layout */
+.app{max-width:900px;margin:0 auto;padding:20px 24px;animation:pageFadeIn 400ms ease-out both}
+@keyframes pageFadeIn{from{opacity:0}to{opacity:1}}
+
+/* Section entrance stagger */
+.header{animation:sectionEnter 300ms cubic-bezier(0.23,1,0.32,1) both}
+.action-bar{animation:sectionEnter 300ms cubic-bezier(0.23,1,0.32,1) both;animation-delay:60ms}
+.repo-table thead{animation:sectionEnter 300ms cubic-bezier(0.23,1,0.32,1) both;animation-delay:120ms}
+.bottom-section{animation:sectionEnter 300ms cubic-bezier(0.23,1,0.32,1) both;animation-delay:180ms}
+@keyframes sectionEnter{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+
+/* Header */
+.header{display:flex;align-items:center;justify-content:space-between;padding-bottom:14px;border-bottom:0.5px solid #D3D1C7}
+.header-left{display:flex;align-items:center;gap:10px}
+.header-logo{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border:0.5px solid #5F5E5A;border-radius:5px;font-size:12px;font-weight:500;color:#2C2C2A}
+.header-title{font-size:15px;font-weight:500;color:#2C2C2A}
+.header-sub{font-size:12px;color:#888780;margin-left:6px}
+.header-actions{display:flex;gap:6px}
+
+/* Buttons */
+.btn{background:transparent;border:0.5px solid #B4B2A9;border-radius:6px;padding:6px 12px;font-size:12px;color:#5F5E5A;cursor:pointer;font-family:inherit}
+.btn:hover{border-color:#888780;color:#2C2C2A}
+.btn-primary{background:#2C2C2A;border:none;color:#fff;font-weight:500;padding:7px 16px}
+.btn-primary:hover{background:#444441}
+.btn-primary:disabled{opacity:0.4;cursor:not-allowed}
+.btn-sm{padding:4px 10px;font-size:12px}
+.btn-danger{border-color:#D3A0A0;color:#A32D2D}
+.btn-danger:hover{border-color:#A32D2D}
+.btn-ghost{color:#888780}
+.btn-ghost:hover{color:#5F5E5A}
+
+/* Action bar */
+.action-bar{display:flex;gap:6px;flex-wrap:wrap;margin-top:14px;margin-bottom:14px}
+
+/* Notification toast */
+.toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#2C2C2A;color:#fff;padding:8px 18px;border-radius:8px;font-size:13px;z-index:1000;opacity:0;transition:opacity 0.2s;pointer-events:none}
+.toast.show{opacity:1}
+
+/* Table */
+.repo-table{width:100%;border-collapse:collapse;font-size:13px;border-top:0.5px solid #D3D1C7;border-bottom:0.5px solid #D3D1C7}
+.repo-table th{text-align:left;padding:7px 10px;font-weight:500;color:#5F5E5A;font-size:12px;border-bottom:0.5px solid #D3D1C7;white-space:nowrap}
+.repo-table td{padding:8px 10px;border-bottom:0.5px solid #EAE8E3;vertical-align:middle}
+.repo-table tr.disabled{opacity:0.45}
+.repo-table tr:last-child td{border-bottom:none}
+.repo-table tbody tr{animation:rowEnter 250ms cubic-bezier(0.23,1,0.32,1) both}
+.repo-table tbody tr:nth-child(1){animation-delay:20ms}
+.repo-table tbody tr:nth-child(2){animation-delay:40ms}
+.repo-table tbody tr:nth-child(3){animation-delay:60ms}
+.repo-table tbody tr:nth-child(4){animation-delay:80ms}
+.repo-table tbody tr:nth-child(5){animation-delay:100ms}
+.repo-table tbody tr:nth-child(6){animation-delay:120ms}
+.repo-table tbody tr:nth-child(7){animation-delay:140ms}
+.repo-table tbody tr:nth-child(8){animation-delay:160ms}
+.repo-table tbody tr:nth-child(9){animation-delay:180ms}
+.repo-table tbody tr:nth-child(10){animation-delay:200ms}
+@keyframes rowEnter{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+
+/* Loading skeleton */
+.skeleton{background:linear-gradient(90deg,#F1EFE8 25%,#F9F8F4 50%,#F1EFE8 75%);background-size:200% 100%;animation:shimmer 1.2s ease-in-out infinite;border-radius:4px;pointer-events:none;user-select:none}
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+
+/* Row highlight on SSE update */
+.repo-table tr.updated{animation:rowFlash 600ms ease-out}
+@keyframes rowFlash{0%{background:#FAEEDA}100%{background:transparent}}
+
+/* Checkbox */
+.checkbox{width:16px;height:16px;border:0.5px solid #888780;border-radius:3px;cursor:pointer;display:inline-block;vertical-align:middle;background:#fff;position:relative;flex-shrink:0}
+.checkbox.checked{background:#2C2C2A;border-color:#2C2C2A}
+.checkbox.checked::after{content:'';position:absolute;left:5px;top:2px;width:4px;height:8px;border:solid #fff;border-width:0 1.5px 1.5px 0;transform:rotate(45deg)}
+.checkbox.disabled{border-color:#D3D1C7}
+tr.disabled .checkbox{border-color:#D3D1C7}
+
+/* Editable cell */
+.editable{cursor:text;padding:2px 4px;border-radius:3px;min-height:18px}
+.editable:hover{background:#F5F4F0}
+.editable:focus{background:#fff;outline:0.5px solid #888780;outline-offset:-0.5px}
+
+/* Status badges */
+.badge{display:inline-block;padding:1px 7px;border-radius:4px;font-size:12px;line-height:1.6;transition:all 250ms cubic-bezier(0.23,1,0.32,1)}
+.badge-green{background:#EAF3DE;color:#3B6D11}
+.badge-amber{background:#FAEEDA;color:#854F0B}
+.badge-red{background:#FCEBEB;color:#A32D2D}
+.badge-gray{background:#F1EFE8;color:#5F5E5A}
+.badge-muted{background:#F1EFE8;color:#888780}
+
+/* Policy select */
+.policy-select{border:none;background:#F1EFE8;padding:1px 6px;border-radius:4px;font-size:12px;color:#444441;cursor:pointer;font-family:inherit}
+.policy-select.force{background:#FAEEDA;color:#854F0B}
+.policy-select:focus{outline:0.5px solid #888780}
+
+/* Bottom section */
+.bottom-section{margin-top:16px;padding-top:14px;border-top:0.5px solid #E8E6E0}
+
+/* Progress bar */
+.progress-area{display:none;align-items:center;gap:10px;margin-bottom:14px;min-height:24px}
+.progress-area.show{display:flex;animation:progressSlideIn 250ms cubic-bezier(0.23,1,0.32,1) both}
+.progress-area.exit{animation:progressSlideOut 200ms ease-in both}
+@keyframes progressSlideIn{from{opacity:0;transform:translateY(-8px);max-height:0}to{opacity:1;transform:translateY(0);max-height:40px}}
+@keyframes progressSlideOut{from{opacity:1;transform:translateY(0);max-height:40px}to{opacity:0;transform:translateY(-8px);max-height:0}}
+.progress-bar{flex:1;height:6px;background:#F1EFE8;border-radius:3px;overflow:hidden}
+.progress-fill{height:100%;background:#5F5E5A;border-radius:3px;transition:width 0.35s cubic-bezier(0.23,1,0.32,1);width:0%}
+.progress-text{font-size:12px;color:#5F5E5A;min-width:30px;text-align:right}
+.progress-detail{font-size:12px;color:#888780;min-width:100px;transition:opacity 150ms ease-out}
+
+/* Log panels */
+.log-grid{display:flex;flex-direction:column;gap:10px}
+.log-panel{min-width:0}
+.log-panel h3{font-size:12px;font-weight:500;color:#5F5E5A;margin-bottom:6px}
+.log-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.log-header select{font-size:12px;padding:2px 4px;border:0.5px solid #D3D1C7;border-radius:4px;background:transparent;color:#5F5E5A;font-family:inherit;cursor:pointer}
+.log-body{background:#F1EFE8;border-radius:6px;padding:8px 10px;font-size:12px;font-family:'SF Mono',Consolas,'Courier New',monospace;line-height:1.7;max-height:120px;overflow-y:auto;color:#444441}
+.log-body > div{animation:logEntry 200ms cubic-bezier(0.23,1,0.32,1) both}
+@keyframes logEntry{from{opacity:0;transform:translateX(-4px)}to{opacity:1;transform:translateX(0)}}
+.log-body .log-error{color:#A32D2D}
+.log-body .log-success{color:#3B6D11}
+.log-body .log-muted{color:#888780}
+.log-empty{color:#888780}
+.log-empty::before{content:'暂无日志';display:block}
+
+/* Modal overlay */
+.modal-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(44,44,42,0.3);z-index:200;align-items:center;justify-content:center}
+.modal-overlay.open{display:flex;animation:overlayIn 200ms ease-out both}
+.modal-overlay.exit{animation:overlayOut 150ms ease-in both}
+@keyframes overlayIn{from{opacity:0}to{opacity:1}}
+@keyframes overlayOut{from{opacity:1}to{opacity:0}}
+.modal{background:#fff;border-radius:12px;border:0.5px solid #D3D1C7;padding:20px 24px;width:420px;max-width:90vw;animation:modalIn 200ms cubic-bezier(0.23,1,0.32,1) both}
+.modal-overlay.exit .modal{animation:modalOut 150ms ease-in both}
+@keyframes modalIn{from{opacity:0;transform:scale(0.95) translateY(8px)}to{opacity:1;transform:scale(1) translateY(0)}}
+@keyframes modalOut{from{opacity:1;transform:scale(1) translateY(0)}to{opacity:0;transform:scale(0.95) translateY(8px)}}
+.modal h2{font-size:14px;font-weight:500;color:#2C2C2A;margin-bottom:16px}
+.form-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:0.5px solid #F1EFE8}
+.form-row:last-child{border-bottom:none}
+.form-row label{font-size:13px;color:#5F5E5A}
+.form-row input[type=number]{width:72px;padding:4px 8px;border:0.5px solid #D3D1C7;border-radius:4px;font-size:13px;text-align:right;font-family:inherit}
+.form-row input[type=number]:focus{outline:0.5px solid #888780}
+.form-row .toggle{position:relative;display:inline-block;width:32px;height:18px;cursor:pointer}
+.form-row .toggle input{display:none}
+.form-row .toggle-slider{position:absolute;top:0;left:0;right:0;bottom:0;background:#D3D1C7;border-radius:9px;transition:background 0.2s}
+.form-row .toggle-slider::after{content:'';position:absolute;top:2px;left:2px;width:14px;height:14px;background:#fff;border-radius:50%;transition:transform 0.2s}
+.form-row .toggle input:checked+.toggle-slider{background:#2C2C2A}
+.form-row .toggle input:checked+.toggle-slider::after{transform:translateX(14px)}
+.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;padding-top:12px;border-top:0.5px solid #EAE8E3}
+
+/* Scanning state */
+.scanning .badge{opacity:0.7}
+
+/* Confirm dialog */
+.confirm-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(44,44,42,0.3);z-index:300;align-items:center;justify-content:center}
+.confirm-overlay.open{display:flex;animation:overlayIn 200ms ease-out both}
+.confirm-overlay.exit{animation:overlayOut 150ms ease-in both}
+.confirm-box{background:#fff;border-radius:12px;padding:20px 24px;width:380px;max-width:90vw;text-align:center;animation:modalIn 200ms cubic-bezier(0.23,1,0.32,1) both}
+.confirm-overlay.exit .confirm-box{animation:modalOut 150ms ease-in both}
+.confirm-box p{font-size:13px;color:#5F5E5A;margin-bottom:16px;line-height:1.6}
+.confirm-actions{display:flex;gap:8px;justify-content:center}
+
+/* No more save bar */
+</style>
+</head>
+<body>
+
+<div class="toast" id="toast"></div>
+
+<div class="app">
+  <!-- ═══ Header ═══ -->
+  <div class="header">
+    <div class="header-left">
+      <span class="header-logo">SD</span>
+      <div>
+        <span class="header-title">SyncDock 5.0</span>
+        <span class="header-sub">仓库同步管理</span>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button class="btn btn-sm" onclick="reloadConfig()">重新加载</button>
+      <button class="btn btn-sm" onclick="openSettings()">设置</button>
+      <button class="btn btn-sm" style="color:#888780" onclick="shutdown()">关闭服务</button>
+    </div>
+  </div>
+
+  <!-- ═══ Action Bar ═══ -->
+  <div class="action-bar">
+    <button class="btn btn-primary" id="btnSyncAll" onclick="startSync('all')">同步全部</button>
+    <button class="btn" id="btnSyncNeeded" onclick="startSync('needed')">仅需同步</button>
+    <button class="btn" id="btnRetry" onclick="startSync('retry')">重试失败</button>
+    <button class="btn btn-ghost" id="btnSyncSelected" onclick="startSync('selected')" disabled>同步选中</button>
+    <button class="btn btn-danger btn-ghost" id="btnForceSelected" onclick="confirmForceSync()" disabled>强制同步选中</button>
+    <button class="btn" onclick="addRepo()">+ 添加仓库</button>
+  </div>
+
+  <!-- ═══ Confirmation Dialog ═══ -->
+  <div class="confirm-overlay" id="confirmOverlay">
+    <div class="confirm-box">
+      <p>强制同步将覆盖本地所有未推送的修改，<br>包括未提交的本地改动。<br>确认继续？</p>
+      <div class="confirm-actions">
+        <button class="btn" onclick="closeConfirm()">取消</button>
+        <button class="btn btn-primary" onclick="doForceSync()">确认强制同步</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Repository Table ═══ -->
+  <table class="repo-table" id="repoTable">
+    <thead>
+      <tr>
+        <th style="width:32px"></th>
+        <th style="width:28px">#</th>
+        <th>仓库名称</th>
+        <th style="width:130px">状态</th>
+        <th style="width:52px">启用</th>
+        <th style="width:90px">同步策略</th>
+        <th style="width:36px"></th>
+      </tr>
+    </thead>
+    <tbody id="repoBody"></tbody>
+  </table>
+
+  <!-- ═══ Bottom Section ═══ -->
+  <div class="bottom-section">
+
+    <!-- Progress -->
+    <div class="progress-area" id="progressArea" style="display:none">
+      <span style="font-size:12px;color:#888780;min-width:56px">同步进度</span>
+      <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+      <span class="progress-text" id="progressText">0/0</span>
+      <span class="progress-detail" id="progressDetail"></span>
+    </div>
+
+    <!-- Log Grid -->
+    <div class="log-grid">
+      <!-- 同步日志在上 -->
+      <div class="log-panel">
+        <div class="log-header">
+          <h3>同步日志</h3>
+          <div style="display:flex;align-items:center;gap:4px">
+            <span style="font-size:11px;color:#888780">显示最近</span>
+            <select id="logLimit" onchange="loadRecentLogs()">
+              <option value="1">1 次</option>
+              <option value="5" selected>5 次</option>
+              <option value="10">10 次</option>
+              <option value="20">20 次</option>
+            </select>
+          </div>
+        </div>
+        <div class="log-body" id="recentLog"><span class="log-muted">加载中...</span></div>
+      </div>
+      <!-- 失败记录在下 -->
+      <div class="log-panel">
+        <h3>失败记录</h3>
+        <div class="log-body" id="failedLog"><span class="log-muted">加载中...</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Settings Modal ═══ -->
+<div class="modal-overlay" id="settingsOverlay">
+  <div class="modal">
+    <h2>全局设置</h2>
+    <div id="settingsForm"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeSettings()">取消</button>
+      <button class="btn btn-primary" onclick="saveSettings()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════
+// State
+// ═══════════════════════════════════════════════
+let repos = [];           // repository config items
+let repoStatus = {};     // name -> status info
+let selectedSet = new Set();
+let isSyncing = false;
+let evtSource = null;
+
+// ═══════════════════════════════════════════════
+// Toast
+// ═══════════════════════════════════════════════
+let toastTimer = null;
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+// ═══════════════════════════════════════════════
+// API helpers
+// ═══════════════════════════════════════════════
+async function apiGet(url) {
+  const r = await fetch(url);
+  if (!r.ok) { const e = await r.json(); throw new Error(e.detail || '请求失败'); }
+  return r.json();
+}
+async function apiPost(url, body) {
+  const r = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body:body ? JSON.stringify(body) : undefined });
+  if (!r.ok) { const e = await r.json(); throw new Error(e.detail || '请求失败'); }
+  return r.json();
+}
+async function apiPut(url, body) {
+  const r = await fetch(url, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
+  if (!r.ok) { const e = await r.json(); throw new Error(e.detail || '请求失败'); }
+  return r.json();
+}
+
+// ═══════════════════════════════════════════════
+// Status badge helpers
+// ═══════════════════════════════════════════════
+const STATUS_LABELS = {
+  'up_to_date':'已经是最新','needs_sync':'需要同步','needs_force_sync':'需要同步',
+  'ahead_only':'本地领先','local_changes':'已跳过','untracked_files':'已跳过',
+  'diverged':'已跳过','no_upstream':'未设置上游','detached_head':'HEAD分离',
+  'invalid_path':'路径无效','not_git_repository':'不是Git仓库',
+  'remote_refresh_failed':'查询失败','disabled':'未启用','error':'查询失败',
+};
+const STATUS_COLORS = {
+  'up_to_date':'badge-green','needs_sync':'badge-amber','needs_force_sync':'badge-amber',
+  'ahead_only':'badge-gray','local_changes':'badge-gray','untracked_files':'badge-gray',
+  'diverged':'badge-gray','no_upstream':'badge-gray','detached_head':'badge-gray',
+  'invalid_path':'badge-red','not_git_repository':'badge-red','remote_refresh_failed':'badge-red',
+  'disabled':'badge-muted','error':'badge-red',
+};
+
+function badgeHtml(code, label) {
+  const cls = STATUS_COLORS[code] || 'badge-gray';
+  return `<span class="badge ${cls}">${label || STATUS_LABELS[code] || code}</span>`;
+}
+
+// ═══════════════════════════════════════════════
+// Load data
+// ═══════════════════════════════════════════════
+async function loadAll() {
+  try {
+    const [repoData, statusData, failedData, recentData] = await Promise.all([
+      apiGet('/api/repositories'),
+      apiGet('/api/status'),
+      apiGet('/api/logs/failed'),
+      apiGet('/api/logs/recent?limit=5'),
+    ]);
+    repos = repoData.repositories;
+    const statusMap = {};
+    for (const row of statusData.rows) { statusMap[row.name] = row; }
+    repoStatus = statusMap;
+    renderTable();
+    renderFailedLog(failedData);
+    renderRecentLog(recentData);
+  } catch(e) {
+    showToast('加载失败：' + e.message);
+  }
+}
+
+// ═══════════════════════════════════════════════
+// Skeleton loading
+// ═══════════════════════════════════════════════
+function showSkeleton() {
+  const tbody = document.getElementById('repoBody');
+  const widths = [70, 90, 110, 80, 100, 85, 120, 95];
+  let html = '';
+  for (let i = 0; i < 5; i++) {
+    const w = widths[i % widths.length];
+    html += `<tr>
+      <td></td><td></td>
+      <td><span class="skeleton" style="display:inline-block;width:${w}px;height:16px;vertical-align:middle"></span></td>
+      <td><span class="skeleton" style="display:inline-block;width:70px;height:18px;vertical-align:middle"></span></td>
+      <td><span class="skeleton" style="display:inline-block;width:16px;height:16px;vertical-align:middle"></span></td>
+      <td><span class="skeleton" style="display:inline-block;width:60px;height:18px;vertical-align:middle"></span></td>
+      <td></td>
+    </tr>`;
+  }
+  tbody.innerHTML = html;
+}
+
+// ═══════════════════════════════════════════════
+// Render table
+// ═══════════════════════════════════════════════
+
+// 状态优先级：数值越大越靠后
+const STATUS_PRIORITY = {
+  'remote_refresh_failed': 0, 'not_git_repository': 0, 'invalid_path': 0, 'error': 0,
+  'needs_sync': 1, 'needs_force_sync': 1,
+  'local_changes': 2, 'untracked_files': 2, 'diverged': 2, 'no_upstream': 2, 'detached_head': 2,
+  'ahead_only': 3, 'up_to_date': 3,
+  'disabled': 4,
+};
+
+function renderTable() {
+  const tbody = document.getElementById('repoBody');
+  // 按状态排序（需同步→已跳过→已最新→未启用），同级按名称字母
+  const indices = repos.map((_, i) => i).sort((a, b) => {
+    const sa = repoStatus[repos[a].name];
+    const sb = repoStatus[repos[b].name];
+    const pa = STATUS_PRIORITY[sa ? sa.status_code : 'disabled'] ?? 99;
+    const pb = STATUS_PRIORITY[sb ? sb.status_code : 'disabled'] ?? 99;
+    return pa - pb || repos[a].name.localeCompare(repos[b].name);
+  });
+
+  let html = '';
+  for (let pos = 0; pos < indices.length; pos++) {
+    const i = indices[pos];
+    const r = repos[i];
+    const status = repoStatus[r.name];
+    const code = status ? status.status_code : 'disabled';
+    const label = status ? status.status_label : '未启用';
+    const disabled = !r.enabled;
+    const checked = selectedSet.has(r.name);
+    const policy = r.sync_policy || 'safe';
+
+    html += `<tr class="${disabled?'disabled':''}" data-idx="${i}">
+      <td><span class="checkbox ${checked?'checked':''} ${disabled?'disabled':''}" onclick="toggleSelect(${i})"></span></td>
+      <td style="color:#B4B2A9;font-size:12px">${pos+1}</td>
+      <td><span class="editable" contenteditable="true" onblur="editName(${i},this)">${r.name}</span></td>
+      <td>${badgeHtml(code, code === 'disabled' ? null : label)}</td>
+      <td><span class="checkbox ${r.enabled?'checked':''}" onclick="toggleEnabled(${i})"></span></td>
+      <td>
+        <select class="policy-select ${policy==='force'?'force':''}" onchange="editPolicy(${i},this)">
+          <option value="safe" ${policy==='safe'?'selected':''}>安全同步</option>
+          <option value="force" ${policy==='force'?'selected':''}>强制同步</option>
+        </select>
+      </td>
+      <td><span style="cursor:pointer;color:#B4B2A9;font-size:14px;line-height:1;padding:2px 4px" onclick="deleteRepo(${i})" title="删除仓库">×</span></td>
+    </tr>`;
+  }
+  tbody.innerHTML = html;
+  updateSelectedButtons();
+}
+
+function toggleSelect(idx) {
+  const r = repos[idx];
+  if (!r.enabled) return;
+  if (selectedSet.has(r.name)) selectedSet.delete(r.name);
+  else selectedSet.add(r.name);
+  renderTable();
+}
+
+let saveTimer = null;
+function autoSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    try {
+      await apiPut('/api/repositories', { repositories: repos });
+    } catch(e) {
+      showToast('保存失败：' + e.message);
+    }
+  }, 400);
+}
+
+function toggleEnabled(idx) {
+  repos[idx].enabled = !repos[idx].enabled;
+  if (!repos[idx].enabled) selectedSet.delete(repos[idx].name);
+  autoSave();
+  renderTable();
+}
+
+function editName(idx, el) {
+  const val = el.textContent.trim();
+  if (!val) { el.textContent = repos[idx].name; return; }
+  if (val === repos[idx].name) return;
+  repos[idx].name = val;
+  autoSave();
+}
+
+function editPolicy(idx, sel) {
+  repos[idx].sync_policy = sel.value;
+  sel.className = 'policy-select' + (sel.value === 'force' ? ' force' : '');
+  autoSave();
+}
+
+function addRepo() {
+  const path = prompt('请输入仓库路径：');
+  if (!path) return;
+  repos.push({ name:'新仓库', path: path, enabled:true, sync_policy:'safe' });
+  autoSave();
+  renderTable();
+}
+
+function deleteRepo(idx) {
+  const name = repos[idx].name;
+  if (!confirm(`确认删除仓库「${name}」？`)) return;
+  repos.splice(idx, 1);
+  selectedSet.delete(name);
+  autoSave();
+  renderTable();
+}
+
+function updateSelectedButtons() {
+  const count = selectedSet.size;
+  document.getElementById('btnSyncSelected').disabled = count === 0;
+  document.getElementById('btnForceSelected').disabled = count === 0;
+}
+
+// ═══════════════════════════════════════════════
+// Sync
+// ═══════════════════════════════════════════════
+async function startSync(mode) {
+  if (isSyncing) { showToast('同步正在进行中'); return; }
+
+  const body = { mode };
+  if (mode === 'selected' || mode === 'force_selected') {
+    if (selectedSet.size === 0) { showToast('请先勾选仓库'); return; }
+    body.names = Array.from(selectedSet);
+  }
+
+  try {
+    const res = await apiPost('/api/sync/start', body);
+    isSyncing = true;
+    setSyncButtonsDisabled(true);
+    connectSSE(res.session_id, res.total);
+  } catch(e) {
+    showToast(e.message);
+  }
+}
+
+function setSyncButtonsDisabled(val) {
+  document.getElementById('btnSyncAll').disabled = val;
+  document.getElementById('btnSyncNeeded').disabled = val;
+  document.getElementById('btnRetry').disabled = val;
+  document.getElementById('btnSyncSelected').disabled = val || selectedSet.size === 0;
+  document.getElementById('btnForceSelected').disabled = val || selectedSet.size === 0;
+  if (val) {
+    document.getElementById('btnSyncAll').textContent = '同步中...';
+  } else {
+    document.getElementById('btnSyncAll').textContent = '同步全部';
+  }
+}
+
+function connectSSE(sessionId, total) {
+  const area = document.getElementById('progressArea');
+  const fill = document.getElementById('progressFill');
+  const text = document.getElementById('progressText');
+  const detail = document.getElementById('progressDetail');
+  area.classList.remove('exit');
+  area.classList.add('show');
+  fill.style.width = '0%';
+  text.textContent = `0/${total}`;
+  detail.textContent = '准备中...';
+
+  if (evtSource) evtSource.close();
+  evtSource = new EventSource(`/api/sync/events/${sessionId}`);
+
+  evtSource.addEventListener('progress', function(e) {
+    const data = JSON.parse(e.data);
+    fill.style.width = (data.progress / data.total * 100) + '%';
+    text.textContent = `${data.progress}/${data.total}`;
+
+    // Animate detail text change with quick fade
+    detail.style.opacity = '0';
+    setTimeout(() => {
+      let label = data.message;
+      if (data.outcome === 'UPDATED') label = '✓ ' + data.name;
+      else if (data.outcome === 'FAILED') label = '✗ ' + data.name;
+      else if (data.outcome === 'SKIPPED' || data.outcome === 'UP_TO_DATE') label = '· ' + data.name;
+      else label = data.name + ': ' + data.message;
+      detail.textContent = label;
+      detail.style.opacity = '1';
+    }, 80);
+
+    // Update status in table for this repo
+    if (data.name && data.outcome) {
+      const si = repoStatus[data.name];
+      if (si) {
+        if (data.outcome === 'UPDATED') {
+          si.status_code = 'up_to_date'; si.status_label = '已经是最新';
+        } else if (data.outcome === 'FAILED') {
+          si.status_code = 'remote_refresh_failed'; si.status_label = '同步失败';
+        } else if (data.outcome === 'SKIPPED') {
+          si.status_code = 'local_changes'; si.status_label = '已跳过';
+        }
+      }
+    }
+  });
+
+  evtSource.addEventListener('complete', function(e) {
+    evtSource.close();
+    evtSource = null;
+    isSyncing = false;
+    setSyncButtonsDisabled(false);
+
+    const data = JSON.parse(e.data);
+    const s = data.summary;
+    fill.style.width = '100%';
+    detail.textContent = '同步完成';
+
+    let msg = `同步完成：${s.updated} 更新`;
+    if (s.failed > 0) msg += `，${s.failed} 失败`;
+    if (s.skipped > 0) msg += `，${s.skipped} 跳过`;
+    showToast(msg);
+
+    // Fade out progress area, then refresh
+    area.classList.remove('show');
+    area.classList.add('exit');
+    setTimeout(() => {
+      loadAll();
+      area.classList.remove('exit');
+    }, 350);
+  });
+}
+
+function confirmForceSync() {
+  const el = document.getElementById('confirmOverlay');
+  el.classList.remove('exit');
+  el.classList.add('open');
+}
+function closeConfirm() {
+  const el = document.getElementById('confirmOverlay');
+  el.classList.remove('open');
+  el.classList.add('exit');
+  setTimeout(() => el.classList.remove('exit'), 200);
+}
+function closeConfirm() {
+  document.getElementById('confirmOverlay').classList.remove('open');
+}
+async function doForceSync() {
+  closeConfirm();
+  await startSync('force_selected');
+}
+
+// ═══════════════════════════════════════════════
+// Config Reload
+// ═══════════════════════════════════════════════
+async function reloadConfig() {
+  try {
+    await apiPost('/api/config/reload');
+    showToast('配置已重新加载');
+    await loadAll();
+  } catch(e) {
+    showToast('重新加载失败：' + e.message);
+  }
+}
+
+async function shutdown() {
+  if (!confirm('确认关闭 SyncDock 服务？')) return;
+  try {
+    await apiPost('/api/shutdown');
+    showToast('服务已关闭');
+    // 延迟关闭页面，让 toast 显示出来
+    setTimeout(() => window.close(), 500);
+  } catch(e) {
+    showToast('关闭失败：' + e.message);
+  }
+}
+
+// ═══════════════════════════════════════════════
+// Logs
+// ═══════════════════════════════════════════════
+function renderFailedLog(data) {
+  const el = document.getElementById('failedLog');
+  if (!data.entries || data.entries.length === 0) {
+    el.innerHTML = '<span class="log-muted">最近一次同步没有失败仓库</span>';
+    return;
+  }
+  el.innerHTML = data.entries.map(e => {
+    let text = e.name + ': ' + e.reason;
+    if (e.suggestion) text += '；' + e.suggestion;
+    return `<div class="log-error">${text}</div>`;
+  }).join('');
+}
+
+function renderRecentLog(data) {
+  const el = document.getElementById('recentLog');
+  if (!data.raw) {
+    el.innerHTML = '<span class="log-muted">暂无日志</span>';
+    return;
+  }
+  el.innerHTML = data.raw.split('\n').map(line => `<div>${line}</div>`).join('');
+}
+
+async function loadRecentLogs() {
+  const limit = document.getElementById('logLimit').value;
+  try {
+    const data = await apiGet('/api/logs/recent?limit=' + limit);
+    renderRecentLog(data);
+  } catch(e) {
+    // silently ignore
+  }
+}
+
+// ═══════════════════════════════════════════════
+// Settings
+// ═══════════════════════════════════════════════
+let settingsData = {};
+
+async function openSettings() {
+  try {
+    settingsData = await apiGet('/api/settings');
+    renderSettingsForm();
+    const el = document.getElementById('settingsOverlay');
+    el.classList.remove('exit');
+    el.classList.add('open');
+  } catch(e) {
+    showToast('加载设置失败：' + e.message);
+  }
+}
+
+function closeSettings() {
+  const el = document.getElementById('settingsOverlay');
+  el.classList.remove('open');
+  el.classList.add('exit');
+  setTimeout(() => el.classList.remove('exit'), 200);
+}
+
+function renderSettingsForm() {
+  const form = document.getElementById('settingsForm');
+  form.innerHTML = `
+    <div class="form-row">
+      <label>并发同步数</label>
+      <input type="number" id="s_concurrent" value="${settingsData.concurrent_limit}" min="1">
+    </div>
+    <div class="form-row">
+      <label>Git 命令超时（秒）</label>
+      <input type="number" id="s_timeout" value="${settingsData.command_timeout_seconds}" min="10">
+    </div>
+    <div class="form-row">
+      <label>跳过未提交修改</label>
+      <label class="toggle">
+        <input type="checkbox" id="s_skip_uncommitted" ${settingsData.skip_uncommitted_changes?'checked':''}>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <div class="form-row">
+      <label>跳过未跟踪文件</label>
+      <label class="toggle">
+        <input type="checkbox" id="s_skip_untracked" ${settingsData.skip_untracked_files?'checked':''}>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <div class="form-row">
+      <label>日志保留天数</label>
+      <input type="number" id="s_log_retention" value="${settingsData.log_retention_days}" min="1">
+    </div>
+  `;
+}
+
+async function saveSettings() {
+  const body = {
+    concurrent_limit: parseInt(document.getElementById('s_concurrent').value) || 3,
+    command_timeout_seconds: parseInt(document.getElementById('s_timeout').value) || 120,
+    skip_uncommitted_changes: document.getElementById('s_skip_uncommitted').checked,
+    skip_untracked_files: document.getElementById('s_skip_untracked').checked,
+    log_retention_days: parseInt(document.getElementById('s_log_retention').value) || 30,
+  };
+  try {
+    await apiPut('/api/settings', body);
+    showToast('设置已保存');
+    closeSettings();
+  } catch(e) {
+    showToast('保存设置失败：' + e.message);
+  }
+}
+
+// ═══════════════════════════════════════════════
+// Init
+// ═══════════════════════════════════════════════
+showSkeleton();
+loadAll();
+</script>
+</body>
+</html>

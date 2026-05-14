@@ -15,3 +15,5 @@ logs/
 venv/
 config/
 tests/
+docs/*
+!docs/plans/
