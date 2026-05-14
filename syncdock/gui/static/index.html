@@ -28,11 +28,15 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#fff;color:#2C2C2
 .header-actions{display:flex;gap:6px}
 
 /* Buttons */
-.btn{background:transparent;border:0.5px solid #B4B2A9;border-radius:6px;padding:6px 12px;font-size:12px;color:#5F5E5A;cursor:pointer;font-family:inherit}
+.btn{background:transparent;border:0.5px solid #B4B2A9;border-radius:6px;padding:6px 12px;font-size:12px;color:#5F5E5A;cursor:pointer;font-family:inherit;transition:all 120ms ease-out;transform:translateZ(0)}
 .btn:hover{border-color:#888780;color:#2C2C2A}
-.btn-primary{background:#2C2C2A;border:none;color:#fff;font-weight:500;padding:7px 16px}
+.btn:active{transform:scale(0.97)}
+.btn-primary{background:#2C2C2A;border:none;color:#fff;font-weight:500;padding:7px 16px;position:relative}
 .btn-primary:hover{background:#444441}
 .btn-primary:disabled{opacity:0.4;cursor:not-allowed}
+.btn-primary.loading{pointer-events:none}
+.btn-primary.loading::after{content:'';position:absolute;inset:0;border-radius:6px;background:linear-gradient(90deg,transparent 25%,rgba(255,255,255,0.15) 50%,transparent 75%);background-size:200% 100%;animation:btnShimmer 1s ease-in-out infinite}
+@keyframes btnShimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
 .btn-sm{padding:4px 10px;font-size:12px}
 .btn-danger{border-color:#D3A0A0;color:#A32D2D}
 .btn-danger:hover{border-color:#A32D2D}
@@ -501,6 +505,22 @@ function updateSelectedButtons() {
 }
 
 // ═══════════════════════════════════════════════
+// Sync log
+// ═══════════════════════════════════════════════
+function appendSyncLog(name, outcome, message) {
+  const el = document.getElementById('recentLog');
+  const time = new Date().toLocaleTimeString('zh-CN', { hour:'2-digit', minute:'2-digit' });
+  let cls = '';
+  if (outcome === 'UPDATED') cls = 'log-success';
+  else if (outcome === 'FAILED') cls = 'log-error';
+  const line = document.createElement('div');
+  line.className = cls;
+  line.textContent = `[${time}] ${name}: ${message}`;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+// ═══════════════════════════════════════════════
 // Sync
 // ═══════════════════════════════════════════════
 async function startSync(mode) {
@@ -515,23 +535,32 @@ async function startSync(mode) {
   try {
     const res = await apiPost('/api/sync/start', body);
     isSyncing = true;
-    setSyncButtonsDisabled(true);
+    setSyncButtonsDisabled(true, mode);
     connectSSE(res.session_id, res.total);
   } catch(e) {
+    setSyncButtonsDisabled(false);
     showToast(e.message);
   }
 }
 
-function setSyncButtonsDisabled(val) {
-  document.getElementById('btnSyncAll').disabled = val;
-  document.getElementById('btnSyncNeeded').disabled = val;
-  document.getElementById('btnRetry').disabled = val;
-  document.getElementById('btnSyncSelected').disabled = val || selectedSet.size === 0;
-  document.getElementById('btnForceSelected').disabled = val || selectedSet.size === 0;
-  if (val) {
-    document.getElementById('btnSyncAll').textContent = '同步中...';
-  } else {
-    document.getElementById('btnSyncAll').textContent = '同步全部';
+function setSyncButtonsDisabled(val, activeMode) {
+  const map = {
+    all: ['btnSyncAll', '同步全部', '同步中...'],
+    needed: ['btnSyncNeeded', '仅需同步', '检查中...'],
+    retry: ['btnRetry', '重试失败', '重试中...'],
+    selected: ['btnSyncSelected', '同步选中', '同步中...'],
+    force_selected: ['btnForceSelected', '强制同步选中', '强制中...'],
+  };
+  for (const [mode, [id, label, loadingLabel]] of Object.entries(map)) {
+    const el = document.getElementById(id);
+    el.disabled = val || ((id === 'btnSyncSelected' || id === 'btnForceSelected') && selectedSet.size === 0);
+    if (val) {
+      el.textContent = mode === activeMode ? loadingLabel : label;
+      el.classList.toggle('loading', mode === activeMode);
+    } else {
+      el.textContent = label;
+      el.classList.remove('loading');
+    }
   }
 }
 
@@ -545,6 +574,8 @@ function connectSSE(sessionId, total) {
   fill.style.width = '0%';
   text.textContent = `0/${total}`;
   detail.textContent = '准备中...';
+  // 清空上次同步日志
+  document.getElementById('recentLog').innerHTML = '';
 
   if (evtSource) evtSource.close();
   evtSource = new EventSource(`/api/sync/events/${sessionId}`);
@@ -566,7 +597,10 @@ function connectSSE(sessionId, total) {
       detail.style.opacity = '1';
     }, 80);
 
-    // Update status in table for this repo
+    // 逐条写入同步日志
+    appendSyncLog(data.name, data.outcome, data.message);
+
+    // 实时更新仓库状态
     if (data.name && data.outcome) {
       const si = repoStatus[data.name];
       if (si) {
@@ -578,6 +612,8 @@ function connectSSE(sessionId, total) {
           si.status_code = 'local_changes'; si.status_label = '已跳过';
         }
       }
+      // 重新渲染表格以更新状态徽章
+      renderTable();
     }
   });
 
@@ -630,12 +666,23 @@ async function doForceSync() {
 // Config Reload
 // ═══════════════════════════════════════════════
 async function reloadConfig() {
+  const btn = document.querySelector('.header-actions .btn:first-child');
+  const orig = btn.textContent;
+  btn.textContent = '加载中...';
+  btn.disabled = true;
+  showSkeleton();
+  // 表格表头下方闪烁动画
+  document.querySelector('.repo-table thead').style.opacity = '0.5';
   try {
     await apiPost('/api/config/reload');
     showToast('配置已重新加载');
     await loadAll();
   } catch(e) {
     showToast('重新加载失败：' + e.message);
+  } finally {
+    btn.textContent = orig;
+    btn.disabled = false;
+    document.querySelector('.repo-table thead').style.opacity = '1';
   }
 }
 
