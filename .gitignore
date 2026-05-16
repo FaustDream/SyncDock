@@ -7,3 +7,5 @@ config/
 tests/
 docs/
 .pytest_cache/
+__pycache__/
+*.pyc
