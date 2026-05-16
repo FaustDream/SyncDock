@@ -88,6 +88,7 @@ tr.disabled .checkbox{border-color:#D3D1C7}
 .editable{cursor:text;padding:2px 4px;border-radius:3px;min-height:18px}
 .editable:hover{background:#F5F4F0}
 .editable:focus{background:#fff;outline:0.5px solid #888780;outline-offset:-0.5px}
+.path-text{display:block;max-width:100%;font-family:'SF Mono',Consolas,'Courier New',monospace;font-size:12px;color:#5F5E5A;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* Status badges */
 .badge{display:inline-block;padding:1px 7px;border-radius:4px;font-size:12px;line-height:1.6;transition:all 250ms cubic-bezier(0.23,1,0.32,1)}
@@ -221,6 +222,7 @@ tr.disabled .checkbox{border-color:#D3D1C7}
         <th style="width:32px"></th>
         <th style="width:28px">#</th>
         <th>仓库名称</th>
+        <th>仓库路径</th>
         <th style="width:130px">状态</th>
         <th style="width:52px">启用</th>
         <th style="width:90px">同步策略</th>
@@ -321,6 +323,13 @@ async function apiPut(url, body) {
   return r.json();
 }
 
+async function refreshStatuses() {
+  const statusData = await apiGet('/api/status');
+  const statusMap = {};
+  for (const row of statusData.rows) { statusMap[row.name] = row; }
+  repoStatus = statusMap;
+}
+
 // ═══════════════════════════════════════════════
 // Status badge helpers
 // ═══════════════════════════════════════════════
@@ -379,6 +388,7 @@ function showSkeleton() {
     html += `<tr>
       <td></td><td></td>
       <td><span class="skeleton" style="display:inline-block;width:${w}px;height:16px;vertical-align:middle"></span></td>
+      <td><span class="skeleton" style="display:inline-block;width:180px;height:16px;vertical-align:middle"></span></td>
       <td><span class="skeleton" style="display:inline-block;width:70px;height:18px;vertical-align:middle"></span></td>
       <td><span class="skeleton" style="display:inline-block;width:16px;height:16px;vertical-align:middle"></span></td>
       <td><span class="skeleton" style="display:inline-block;width:60px;height:18px;vertical-align:middle"></span></td>
@@ -427,6 +437,7 @@ function renderTable() {
       <td><span class="checkbox ${checked?'checked':''} ${disabled?'disabled':''}" onclick="toggleSelect(${i})"></span></td>
       <td style="color:#B4B2A9;font-size:12px">${pos+1}</td>
       <td><span class="editable" contenteditable="true" onblur="editName(${i},this)">${r.name}</span></td>
+      <td><span class="editable path-text" contenteditable="true" onblur="editPath(${i},this)" title="${r.path}">${r.path}</span></td>
       <td>${badgeHtml(code, code === 'disabled' ? null : label)}</td>
       <td><span class="checkbox ${r.enabled?'checked':''}" onclick="toggleEnabled(${i})"></span></td>
       <td>
@@ -456,6 +467,8 @@ function autoSave() {
   saveTimer = setTimeout(async () => {
     try {
       await apiPut('/api/repositories', { repositories: repos });
+      await refreshStatuses();
+      renderTable();
     } catch(e) {
       showToast('保存失败：' + e.message);
     }
@@ -477,6 +490,15 @@ function editName(idx, el) {
   autoSave();
 }
 
+function editPath(idx, el) {
+  const val = el.textContent.trim();
+  if (!val) { el.textContent = repos[idx].path; return; }
+  if (val === repos[idx].path) return;
+  repos[idx].path = val;
+  el.title = val;
+  autoSave();
+}
+
 function editPolicy(idx, sel) {
   repos[idx].sync_policy = sel.value;
   sel.className = 'policy-select' + (sel.value === 'force' ? ' force' : '');
@@ -486,7 +508,11 @@ function editPolicy(idx, sel) {
 function addRepo() {
   const path = prompt('请输入仓库路径：');
   if (!path) return;
-  repos.push({ name:'新仓库', path: path, enabled:true, sync_policy:'safe' });
+  const cleanPath = path.trim();
+  if (!cleanPath) return;
+  const segments = cleanPath.replace(/\\/g, '/').split('/').filter(Boolean);
+  const inferredName = segments.length ? segments[segments.length - 1] : '新仓库';
+  repos.push({ name: inferredName, path: cleanPath, enabled:true, sync_policy:'safe' });
   autoSave();
   renderTable();
 }
@@ -619,7 +645,7 @@ function connectSSE(sessionId, total) {
       for (const row of rows) {
         const nameCell = row.querySelector('td:nth-child(3) .editable');
         if (nameCell && (nameCell.textContent.trim() === data.name)) {
-          const statusCell = row.querySelector('td:nth-child(4)');
+          const statusCell = row.querySelector('td:nth-child(5)');
           if (statusCell) {
             const code = si ? si.status_code : 'disabled';
             const label = si ? si.status_label : '未启用';

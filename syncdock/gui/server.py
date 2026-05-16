@@ -245,6 +245,31 @@ def _repo_to_dict(r: RepositoryConfig) -> dict:
     }
 
 
+def _normalize_repository_payload(items: list[dict]) -> list[dict]:
+    raw: list[dict] = []
+    seen_names: set[str] = set()
+    for item in items:
+        name = str(item.get("name", "")).strip()
+        path = str(item.get("path", "")).strip()
+        policy = str(item.get("sync_policy", "safe")).strip().lower() or "safe"
+        if not name:
+            raise HTTPException(400, "仓库名称不能为空")
+        if not path:
+            raise HTTPException(400, "仓库路径不能为空")
+        if name in seen_names:
+            raise HTTPException(400, f"仓库名称不能重复：{name}")
+        seen_names.add(name)
+        raw.append(
+            {
+                "name": name,
+                "path": path,
+                "enabled": bool(item.get("enabled", True)),
+                "sync_policy": "force" if policy == "force" else "safe",
+            }
+        )
+    return raw
+
+
 @app.get("/api/repositories")
 async def get_repositories():
     """返回仓库列表。"""
@@ -256,17 +281,12 @@ async def get_repositories():
 async def save_repositories(data: dict):
     """保存仓库配置到 repositories.json。"""
     items = data.get("repositories", [])
-    raw: list[dict] = []
-    for item in items:
-        policy = item.get("sync_policy", "safe")
-        raw.append({
-            "name": item["name"].strip(),
-            "path": item["path"].strip(),
-            "enabled": bool(item.get("enabled", True)),
-            "sync_policy": policy,
-        })
-    _write_json(_CONFIG_DIR / "repositories.json", {"repositories": raw})
-    _reload_runtime()
+    raw = _normalize_repository_payload(items)
+    try:
+        _write_json(_CONFIG_DIR / "repositories.json", {"repositories": raw})
+        _reload_runtime()
+    except (OSError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
     return {"ok": True}
 
 
