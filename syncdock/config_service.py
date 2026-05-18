@@ -13,7 +13,9 @@ DEFAULT_SETTINGS = {
     "skip_uncommitted_changes": True,
     "skip_untracked_files": False,
     "log_retention_days": 30,
+    "proxy_port": 28203,
 }
+
 
 
 @dataclass(slots=True)
@@ -35,6 +37,8 @@ class SettingsConfig:
     skip_uncommitted_changes: bool
     skip_untracked_files: bool
     log_retention_days: int
+    proxy_port: int
+
 
 
 @dataclass(slots=True)
@@ -150,5 +154,7 @@ def load_runtime_config(config_dir: Path, *, progress_factory=create_progress_ba
         skip_uncommitted_changes=bool(settings_raw["skip_uncommitted_changes"]),
         skip_untracked_files=bool(settings_raw["skip_untracked_files"]),
         log_retention_days=max(1, int(settings_raw["log_retention_days"])),
+        proxy_port=max(1, int(settings_raw.get("proxy_port", DEFAULT_SETTINGS["proxy_port"]))),
     )
+
     return RuntimeConfig(repositories=repositories, settings=settings)

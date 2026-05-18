@@ -15,10 +15,10 @@ class SyncResult:
 
 
 class GitCommandRunner:
-    def run(self, cwd: str, args: list[str], timeout_seconds: int) -> tuple[bool, str]:
+    def run(self, cwd: str, args: list[str], timeout_seconds: int, proxy_port: int | None = None) -> tuple[bool, str]:
         try:
             completed = subprocess.run(
-                ["git", *args],
+                self._build_command(args, proxy_port),
                 cwd=cwd,
                 check=True,
                 stdout=subprocess.PIPE,
@@ -42,6 +42,19 @@ class GitCommandRunner:
 
         output = completed.stdout.strip() or completed.stderr.strip()
         return True, output
+
+    @staticmethod
+    def _build_command(args: list[str], proxy_port: int | None) -> list[str]:
+        if proxy_port is None:
+            return ["git", *args]
+
+        proxy_url = f"http://127.0.0.1:{max(1, int(proxy_port))}"
+        return [
+            "git",
+            "-c", f"http.proxy={proxy_url}",
+            "-c", f"https.proxy={proxy_url}",
+            *args,
+        ]
 
 
 def summarize_results(results: list[SyncResult]) -> dict[str, int]:
@@ -79,6 +92,7 @@ def sync_single_repository(repository: RepositoryConfig, settings: SettingsConfi
         repository.path,
         ["fetch", "--all", "--prune"],
         settings.command_timeout_seconds,
+        settings.proxy_port,
     )
     if not fetch_ok:
         return SyncResult(repository.name, "FAILED", fetch_message)
@@ -99,6 +113,7 @@ def sync_single_repository(repository: RepositoryConfig, settings: SettingsConfi
         repository.path,
         ["pull", "--ff-only"],
         settings.command_timeout_seconds,
+        settings.proxy_port,
     )
     if not pull_ok:
         return SyncResult(repository.name, "FAILED", pull_message)
@@ -126,6 +141,7 @@ def force_sync_single_repository(repository: RepositoryConfig, settings: Setting
         repository.path,
         ["fetch", "--all", "--prune"],
         settings.command_timeout_seconds,
+        settings.proxy_port,
     )
     if not fetch_ok:
         return SyncResult(repository.name, "FAILED", fetch_message)
@@ -134,6 +150,7 @@ def force_sync_single_repository(repository: RepositoryConfig, settings: Setting
         repository.path,
         ["reset", "--hard", "@{upstream}"],
         settings.command_timeout_seconds,
+        settings.proxy_port,
     )
     if not reset_ok:
         return SyncResult(repository.name, "FAILED", reset_message)
@@ -142,6 +159,7 @@ def force_sync_single_repository(repository: RepositoryConfig, settings: Setting
         repository.path,
         ["clean", "-fd"],
         settings.command_timeout_seconds,
+        settings.proxy_port,
     )
     if not clean_ok:
         return SyncResult(repository.name, "FAILED", clean_message)

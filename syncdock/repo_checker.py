@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 import subprocess
 
@@ -109,7 +110,7 @@ class RepositoryChecker:
         upstream_name = upstream.stdout.strip()
 
         if refresh_remote:
-            remote_status = self._refresh_remote(path, settings.command_timeout_seconds)
+            remote_status = self._refresh_remote(path, settings.command_timeout_seconds, settings.proxy_port)
             if remote_status is not None:
                 return {
                     "kind": "failed",
@@ -176,10 +177,10 @@ class RepositoryChecker:
             "behind_count": behind,
         }
 
-    def _refresh_remote(self, cwd: Path, timeout_seconds: int) -> str | None:
+    def _refresh_remote(self, cwd: Path, timeout_seconds: int, proxy_port: int | None = None) -> str | None:
         try:
             subprocess.run(
-                ["git", "fetch", "--all", "--prune"],
+                self._build_command(["fetch", "--all", "--prune"], proxy_port),
                 cwd=cwd,
                 check=True,
                 stdout=subprocess.PIPE,
@@ -199,6 +200,19 @@ class RepositoryChecker:
             if "could not resolve host" in stderr or "failed to connect" in stderr:
                 return "查询远端状态失败，网络连接异常"
             return "查询远端状态失败"
+
+    @staticmethod
+    def _build_command(args: list[str], proxy_port: int | None) -> list[str]:
+        if proxy_port is None:
+            return ["git", *args]
+
+        proxy_url = f"http://127.0.0.1:{max(1, int(proxy_port))}"
+        return [
+            "git",
+            "-c", f"http.proxy={proxy_url}",
+            "-c", f"https.proxy={proxy_url}",
+            *args,
+        ]
 
     def _run_git(self, cwd: Path, *args: str) -> subprocess.CompletedProcess | None:
         try:
