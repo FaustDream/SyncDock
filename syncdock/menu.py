@@ -16,8 +16,10 @@ from syncdock.repo_checker import RepositoryChecker, format_status_detail
 from syncdock.sync_engine import (
     GitCommandRunner,
     force_sync_single_repository,
+    run_repositories_concurrently,
     summarize_results,
     sync_all_repositories,
+    sync_repository_by_policy,
     sync_single_repository,
     SyncResult,
 )
@@ -145,21 +147,20 @@ def _sync_repositories_with_progress(
         mode = "force" if force else "auto"
     progress_title = "强制同步进度" if mode == "force" else "同步进度"
     progress = progress_factory(progress_title, len(repositories)) if repositories else None
-    results = []
-    for repository in repositories:
+    def worker(repository) -> SyncResult:
+        # CLI 多仓库同步与 GUI 保持一致：只并发调度仓库分片，不改变安全/强制同步策略。
         if mode == "force":
-            result = force_sync_single_repository(repository, settings, checker=checker, git_runner=git_runner)
-        elif mode == "safe":
-            result = sync_single_repository(repository, settings, checker=checker, git_runner=git_runner)
-        else:
-            if repository.uses_force_sync:
-                result = force_sync_single_repository(repository, settings, checker=checker, git_runner=git_runner)
-            else:
-                result = sync_single_repository(repository, settings, checker=checker, git_runner=git_runner)
-        results.append(result)
-        if progress is not None:
-            progress.advance(f"已完成：{repository.name}")
-    return results
+            return force_sync_single_repository(repository, settings, checker=checker, git_runner=git_runner)
+        if mode == "safe":
+            return sync_single_repository(repository, settings, checker=checker, git_runner=git_runner)
+        return sync_repository_by_policy(repository, settings, checker=checker, git_runner=git_runner)
+
+    return run_repositories_concurrently(
+        repositories,
+        settings,
+        worker,
+        progress_callback=(lambda result: progress.advance(f"已完成：{result.name}")) if progress else None,
+    )
 
 
 def _sync_selected(
@@ -325,13 +326,20 @@ def _retry_recent_failed(
 def _collect_status_rows(runtime: RuntimeConfig, checker, *, progress_factory=create_progress_bar) -> list[tuple[str, str]]:
     enabled = _sort_repositories_for_display([repository for repository in runtime.repositories if repository.enabled])
     progress = progress_factory("查询仓库状态", len(enabled)) if enabled else None
-    rows: list[tuple[str, str]] = []
-    for repository in enabled:
+    rows_by_name: dict[str, str] = {}
+
+    def worker(repository) -> SyncResult:
         inspection = _inspect_repository_for_sync(repository, runtime.settings, checker)
-        rows.append((repository.name, format_status_detail(repository, inspection)))
-        if progress is not None:
-            progress.advance(f"已完成：{repository.name}")
-    return rows
+        rows_by_name[repository.name] = format_status_detail(repository, inspection)
+        return SyncResult(repository.name, "UP_TO_DATE", inspection["message"])
+
+    run_repositories_concurrently(
+        enabled,
+        runtime.settings,
+        worker,
+        progress_callback=(lambda result: progress.advance(f"已完成：{result.name}")) if progress else None,
+    )
+    return [(repository.name, rows_by_name[repository.name]) for repository in enabled if repository.name in rows_by_name]
 
 
 def _show_status(runtime: RuntimeConfig, checker, *, progress_factory=create_progress_bar) -> None:

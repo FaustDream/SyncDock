@@ -241,6 +241,7 @@ tr.disabled .checkbox{border-color:#D3D1C7}
       <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
       <span class="progress-text" id="progressText">0/0</span>
       <span class="progress-detail" id="progressDetail"></span>
+      <button class="btn btn-sm btn-ghost" id="btnCancelSync" onclick="cancelSync()" style="display:none;color:#A32D2D">取消</button>
     </div>
 
     <!-- Log Grid -->
@@ -287,10 +288,13 @@ tr.disabled .checkbox{border-color:#D3D1C7}
 // State
 // ═══════════════════════════════════════════════
 let repos = [];           // repository config items
-let repoStatus = {};     // name -> status info
+let repoStatus = {};      // name -> status info
 let selectedSet = new Set();
 let isSyncing = false;
 let evtSource = null;
+let statusEvtSource = null;
+let isRefreshingStatus = false;
+let thisSyncSession = null;
 
 // ═══════════════════════════════════════════════
 // Toast
@@ -323,11 +327,32 @@ async function apiPut(url, body) {
   return r.json();
 }
 
-async function refreshStatuses() {
-  const statusData = await apiGet('/api/status');
+function escapeHtml(value) {
+  // 仓库配置、Git 输出和日志都可能包含特殊字符，进入 innerHTML 前必须统一转义。
+  return String(value ?? '').replace(/[&<>"']/g, function(ch) {
+    return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[ch];
+  });
+}
+
+function mergeStatusRows(rows) {
   const statusMap = {};
-  for (const row of statusData.rows) { statusMap[row.name] = row; }
+  for (const row of rows || []) {
+    statusMap[row.name] = row;
+  }
   repoStatus = statusMap;
+}
+
+async function refreshStatuses(options = {}) {
+  // 如果已有刷新任务运行，先取消它再重新发起，避免堆积多组 Git 子进程。
+  const names = Array.isArray(options.names) ? options.names : null;
+  const refreshRemote = options.refreshRemote !== false;
+  if (isRefreshingStatus) {
+    await cancelStatusRefresh().catch(() => {});
+    isRefreshingStatus = false;
+  }
+  const payload = names && names.length ? { names, refresh_remote: refreshRemote } : { refresh_remote: refreshRemote };
+  const res = await apiPost('/api/status/refresh', payload);
+  connectStatusSSE(res.session_id, res.total, { silent: !!options.silent, degraded: !!res.degraded });
 }
 
 // ═══════════════════════════════════════════════
@@ -338,19 +363,22 @@ const STATUS_LABELS = {
   'ahead_only':'本地领先','local_changes':'已跳过','untracked_files':'已跳过',
   'diverged':'已跳过','no_upstream':'未设置上游','detached_head':'HEAD分离',
   'invalid_path':'路径无效','not_git_repository':'不是Git仓库',
-  'remote_refresh_failed':'查询失败','disabled':'未启用','error':'查询失败',
+  'remote_refresh_failed':'查询失败','local_status_failed':'查询失败',
+  'branch_compare_failed':'查询失败','disabled':'未启用','error':'查询失败',
+  'unknown':'等待刷新',
 };
 const STATUS_COLORS = {
   'up_to_date':'badge-green','needs_sync':'badge-amber','needs_force_sync':'badge-amber',
   'ahead_only':'badge-gray','local_changes':'badge-gray','untracked_files':'badge-gray',
   'diverged':'badge-gray','no_upstream':'badge-gray','detached_head':'badge-gray',
   'invalid_path':'badge-red','not_git_repository':'badge-red','remote_refresh_failed':'badge-red',
-  'disabled':'badge-muted','error':'badge-red',
+  'local_status_failed':'badge-red','branch_compare_failed':'badge-red',
+  'disabled':'badge-muted','error':'badge-red','unknown':'badge-muted',
 };
 
 function badgeHtml(code, label) {
   const cls = STATUS_COLORS[code] || 'badge-gray';
-  return `<span class="badge ${cls}">${label || STATUS_LABELS[code] || code}</span>`;
+  return `<span class="badge ${cls}">${escapeHtml(label || STATUS_LABELS[code] || code)}</span>`;
 }
 
 // ═══════════════════════════════════════════════
@@ -360,17 +388,17 @@ async function loadAll() {
   try {
     const [repoData, statusData, failedData, recentData] = await Promise.all([
       apiGet('/api/repositories'),
-      apiGet('/api/status'),
+      apiGet('/api/status/snapshot'),
       apiGet('/api/logs/failed'),
       apiGet('/api/logs/recent?limit=5'),
     ]);
     repos = repoData.repositories;
-    const statusMap = {};
-    for (const row of statusData.rows) { statusMap[row.name] = row; }
-    repoStatus = statusMap;
+    mergeStatusRows(statusData.rows);
     renderTable();
     renderFailedLog(failedData);
     renderRecentLog(recentData);
+    // 首屏先使用快照立即渲染，再后台异步刷新远端状态，避免页面白等所有 Git fetch 完成。
+    refreshStatuses({ silent: true }).catch(() => {});
   } catch(e) {
     showToast('加载失败：' + e.message);
   }
@@ -404,10 +432,12 @@ function showSkeleton() {
 
 // 状态优先级：数值越大越靠后
 const STATUS_PRIORITY = {
-  'remote_refresh_failed': 0, 'not_git_repository': 0, 'invalid_path': 0, 'error': 0,
+  'remote_refresh_failed': 0, 'local_status_failed': 0, 'branch_compare_failed': 0,
+  'not_git_repository': 0, 'invalid_path': 0, 'error': 0,
   'needs_sync': 1, 'needs_force_sync': 1,
   'local_changes': 2, 'untracked_files': 2, 'diverged': 2, 'no_upstream': 2, 'detached_head': 2,
   'ahead_only': 3, 'up_to_date': 3,
+  'unknown': 3,
   'disabled': 4,
 };
 
@@ -432,13 +462,17 @@ function renderTable() {
     const disabled = !r.enabled;
     const checked = selectedSet.has(r.name);
     const policy = r.sync_policy || 'safe';
+    const detail = status && status.detail ? status.detail : '';
+    const safeName = escapeHtml(r.name);
+    const safePath = escapeHtml(r.path);
+    const safeDetail = escapeHtml(detail);
 
-    html += `<tr class="${disabled?'disabled':''}" data-idx="${i}">
+    html += `<tr class="${disabled?'disabled':''}" data-idx="${i}" data-repo-name="${encodeURIComponent(r.name)}">
       <td><span class="checkbox ${checked?'checked':''} ${disabled?'disabled':''}" onclick="toggleSelect(${i})"></span></td>
       <td style="color:#B4B2A9;font-size:12px">${pos+1}</td>
-      <td><span class="editable" contenteditable="true" onblur="editName(${i},this)">${r.name}</span></td>
-      <td><span class="editable path-text" contenteditable="true" onblur="editPath(${i},this)" title="${r.path}">${r.path}</span></td>
-      <td>${badgeHtml(code, code === 'disabled' ? null : label)}</td>
+      <td><span class="editable" contenteditable="true" onblur="editName(${i},this)">${safeName}</span></td>
+      <td><span class="editable path-text" contenteditable="true" onblur="editPath(${i},this)" title="${safePath}">${safePath}</span></td>
+      <td title="${safeDetail}">${badgeHtml(code, code === 'disabled' ? null : label)}</td>
       <td><span class="checkbox ${r.enabled?'checked':''}" onclick="toggleEnabled(${i})"></span></td>
       <td>
         <select class="policy-select ${policy==='force'?'force':''}" onchange="editPolicy(${i},this)">
@@ -467,7 +501,7 @@ function autoSave() {
   saveTimer = setTimeout(async () => {
     try {
       await apiPut('/api/repositories', { repositories: repos });
-      await refreshStatuses();
+      await refreshStatuses({ silent: true });
       renderTable();
     } catch(e) {
       showToast('保存失败：' + e.message);
@@ -486,7 +520,12 @@ function editName(idx, el) {
   const val = el.textContent.trim();
   if (!val) { el.textContent = repos[idx].name; return; }
   if (val === repos[idx].name) return;
+  const oldName = repos[idx].name;
   repos[idx].name = val;
+  if (selectedSet.has(oldName)) {
+    selectedSet.delete(oldName);
+    selectedSet.add(val);
+  }
   autoSave();
 }
 
@@ -499,64 +538,114 @@ function editPath(idx, el) {
   autoSave();
 }
 
-function editPolicy(idx, sel) {
-  repos[idx].sync_policy = sel.value;
-  sel.className = 'policy-select' + (sel.value === 'force' ? ' force' : '');
+function editPolicy(idx, el) {
+  repos[idx].sync_policy = el.value;
   autoSave();
 }
 
 function addRepo() {
-  const path = prompt('请输入仓库路径：');
-  if (!path) return;
-  const cleanPath = path.trim();
-  if (!cleanPath) return;
-  const segments = cleanPath.replace(/\\/g, '/').split('/').filter(Boolean);
-  const inferredName = segments.length ? segments[segments.length - 1] : '新仓库';
-  repos.push({ name: inferredName, path: cleanPath, enabled:true, sync_policy:'safe' });
-  autoSave();
+  repos.push({ name:'新仓库', path:'', enabled:true, sync_policy:'safe' });
   renderTable();
+  autoSave();
 }
 
 function deleteRepo(idx) {
-  const name = repos[idx].name;
-  if (!confirm(`确认删除仓库「${name}」？`)) return;
+  selectedSet.delete(repos[idx].name);
   repos.splice(idx, 1);
-  selectedSet.delete(name);
-  autoSave();
   renderTable();
+  autoSave();
 }
 
 function updateSelectedButtons() {
-  const count = selectedSet.size;
-  document.getElementById('btnSyncSelected').disabled = count === 0;
-  document.getElementById('btnForceSelected').disabled = count === 0;
+  document.getElementById('btnSyncSelected').disabled = selectedSet.size === 0 || isSyncing;
+  document.getElementById('btnForceSelected').disabled = selectedSet.size === 0 || isSyncing;
 }
 
-// ═══════════════════════════════════════════════
-// Sync log
-// ═══════════════════════════════════════════════
-function appendSyncLog(name, outcome, message) {
-  const el = document.getElementById('recentLog');
-  const time = new Date().toLocaleTimeString('zh-CN', { hour:'2-digit', minute:'2-digit' });
-  let cls = '';
-  if (outcome === 'UPDATED') cls = 'log-success';
-  else if (outcome === 'FAILED') cls = 'log-error';
-  const line = document.createElement('div');
-  line.className = cls;
-  line.textContent = `[${time}] ${name}: ${message}`;
-  el.appendChild(line);
-  el.scrollTop = el.scrollHeight;
+function applyStatusRow(row, options = {}) {
+  if (!row || !row.name) return;
+  repoStatus[row.name] = { ...(repoStatus[row.name] || {}), ...row };
+  const repo = repos.find(item => item.name === row.name);
+  if (!repo) return;
+  const tableRow = document.querySelector(`#repoBody tr[data-repo-name="${encodeURIComponent(row.name)}"]`);
+  const shouldRenderWholeTable = !!options.forceRender || !tableRow;
+  if (shouldRenderWholeTable) {
+    renderTable();
+    return;
+  }
+
+  const statusCell = tableRow.querySelector('td:nth-child(5)');
+  if (statusCell) {
+    const code = row.status_code || 'unknown';
+    const label = row.status_label || STATUS_LABELS[code] || '状态未知';
+    statusCell.innerHTML = badgeHtml(code, code === 'disabled' ? null : label);
+    statusCell.title = row.detail || '';
+  }
+  tableRow.classList.remove('updated');
+  void tableRow.offsetWidth;
+  tableRow.classList.add('updated');
+}
+
+function connectStatusSSE(sessionId, total, options = {}) {
+  if (!sessionId || isRefreshingStatus) return;
+  isRefreshingStatus = true;
+  if (statusEvtSource) statusEvtSource.close();
+  statusEvtSource = new EventSource(`/api/status/events/${sessionId}`);
+
+  statusEvtSource.addEventListener('progress', function(e) {
+    const data = JSON.parse(e.data);
+    applyStatusRow(data);
+  });
+
+  statusEvtSource.addEventListener('complete', function(e) {
+    const data = JSON.parse(e.data);
+    if (statusEvtSource) {
+      statusEvtSource.close();
+      statusEvtSource = null;
+    }
+    isRefreshingStatus = false;
+    const summary = data.summary || {};
+    if (summary.cancelled) {
+      if (!options.silent) showToast('状态刷新已取消');
+      return;
+    }
+    if (!options.silent) {
+      if (options.degraded) {
+        showToast('状态为缓存快照（同步进行中）');
+      } else {
+        showToast(`状态已刷新：${summary.refreshed || 0} 个仓库`);
+      }
+    }
+  });
+
+  statusEvtSource.onerror = function() {
+    if (statusEvtSource) {
+      statusEvtSource.close();
+      statusEvtSource = null;
+    }
+    isRefreshingStatus = false;
+  };
+}
+
+async function cancelStatusRefresh() {
+  try {
+    await apiPost('/api/status/refresh/cancel');
+  } catch(e) {
+    // 静默处理取消失败
+  }
 }
 
 // ═══════════════════════════════════════════════
 // Sync
 // ═══════════════════════════════════════════════
 async function startSync(mode) {
-  if (isSyncing) { showToast('同步正在进行中'); return; }
+  if (isSyncing) return;
+  if ((mode === 'selected' || mode === 'force_selected') && selectedSet.size === 0) {
+    showToast('请先选择仓库');
+    return;
+  }
 
   const body = { mode };
   if (mode === 'selected' || mode === 'force_selected') {
-    if (selectedSet.size === 0) { showToast('请先勾选仓库'); return; }
     body.names = Array.from(selectedSet);
   }
 
@@ -592,95 +681,130 @@ function setSyncButtonsDisabled(val, activeMode) {
   }
 }
 
+function updateRepoStatusFromSync(data) {
+  // 同步事件只更新对应仓库的状态列，避免每个进度事件扫描或重绘整张表。
+  if (!data.name || !data.outcome) return;
+  let row = repoStatus[data.name];
+  if (!row) {
+    row = { name:data.name, status_code:'unknown', status_label:'等待刷新', detail:'' };
+  }
+  if (data.outcome === 'UPDATED' || data.outcome === 'UP_TO_DATE') {
+    row.status_code = 'up_to_date'; row.status_label = '已经是最新';
+  } else if (data.outcome === 'FAILED') {
+    row.status_code = 'remote_refresh_failed'; row.status_label = '同步失败';
+  } else if (data.outcome === 'SKIPPED') {
+    row.status_code = 'local_changes'; row.status_label = '已跳过';
+  } else if (data.outcome === 'INVALID') {
+    row.status_code = 'invalid_path'; row.status_label = '仓库无效';
+  }
+  row.detail = data.message || row.detail || '';
+  applyStatusRow(row);
+}
+
 function connectSSE(sessionId, total) {
   const area = document.getElementById('progressArea');
   const fill = document.getElementById('progressFill');
   const text = document.getElementById('progressText');
   const detail = document.getElementById('progressDetail');
+  const cancelBtn = document.getElementById('btnCancelSync');
   area.classList.remove('exit');
   area.classList.add('show');
   fill.style.width = '0%';
   text.textContent = `0/${total}`;
   detail.textContent = '准备中...';
+  cancelBtn.style.display = 'inline-block';
   // 清空上次同步日志
   document.getElementById('recentLog').innerHTML = '';
 
   if (evtSource) evtSource.close();
+  thisSyncSession = sessionId;
   evtSource = new EventSource(`/api/sync/events/${sessionId}`);
 
   evtSource.addEventListener('progress', function(e) {
     const data = JSON.parse(e.data);
-    fill.style.width = (data.progress / data.total * 100) + '%';
-    text.textContent = `${data.progress}/${data.total}`;
+    const progressTotal = Math.max(data.total || total || 1, data.progress || 0);
+    fill.style.width = (data.progress / progressTotal * 100) + '%';
+    text.textContent = `${data.progress}/${progressTotal}`;
 
-    // Animate detail text change with quick fade
-    detail.style.opacity = '0';
-    setTimeout(() => {
-      let label = data.message;
-      if (data.outcome === 'UPDATED') label = '✓ ' + data.name;
-      else if (data.outcome === 'FAILED') label = '✗ ' + data.name;
-      else if (data.outcome === 'SKIPPED' || data.outcome === 'UP_TO_DATE') label = '· ' + data.name;
-      else label = data.name + ': ' + data.message;
-      detail.textContent = label;
-      detail.style.opacity = '1';
-    }, 80);
+    // 根据 phase 字段展示阶段信息：扫描中 / 同步中
+    if (data.phase === 'scanning') {
+      detail.textContent = '扫描中: ' + data.name;
+    } else if (data.phase === 'syncing') {
+      detail.textContent = '同步中: ' + data.name;
+    } else {
+      // Animate detail text change with quick fade
+      detail.style.opacity = '0';
+      setTimeout(() => {
+        let label = data.message;
+        if (data.outcome === 'UPDATED') label = '✓ ' + data.name;
+        else if (data.outcome === 'FAILED') label = '✗ ' + data.name;
+        else if (data.outcome === 'SKIPPED' || data.outcome === 'UP_TO_DATE') label = '· ' + data.name;
+        else if (label === undefined || label === null) label = data.name;
+        detail.textContent = label;
+        detail.style.opacity = '1';
+      }, 80);
+    }
 
     // 逐条写入同步日志
     appendSyncLog(data.name, data.outcome, data.message);
 
     // 实时更新仓库状态（仅更新对应行，避免全表重绘）
-    if (data.name && data.outcome) {
-      const si = repoStatus[data.name];
-      if (si) {
-        if (data.outcome === 'UPDATED') {
-          si.status_code = 'up_to_date'; si.status_label = '已经是最新';
-        } else if (data.outcome === 'FAILED') {
-          si.status_code = 'remote_refresh_failed'; si.status_label = '同步失败';
-        } else if (data.outcome === 'SKIPPED') {
-          si.status_code = 'local_changes'; si.status_label = '已跳过';
-        }
-      }
-      // 找到对应行仅更新状态列
-      const rows = document.querySelectorAll('#repoBody tr');
-      for (const row of rows) {
-        const nameCell = row.querySelector('td:nth-child(3) .editable');
-        if (nameCell && (nameCell.textContent.trim() === data.name)) {
-          const statusCell = row.querySelector('td:nth-child(5)');
-          if (statusCell) {
-            const code = si ? si.status_code : 'disabled';
-            const label = si ? si.status_label : '未启用';
-            statusCell.innerHTML = badgeHtml(code, code === 'disabled' ? null : label);
-          }
-          break;
-        }
-      }
-    }
+    updateRepoStatusFromSync(data);
   });
 
   evtSource.addEventListener('complete', function(e) {
     evtSource.close();
     evtSource = null;
     isSyncing = false;
+    thisSyncSession = null;
     setSyncButtonsDisabled(false);
+    cancelBtn.style.display = 'none';
 
     const data = JSON.parse(e.data);
-    const s = data.summary;
+    const s = data.summary || {};
     fill.style.width = '100%';
     detail.textContent = '同步完成';
+
+    // 处理取消事件
+    if (s.cancelled) {
+      detail.textContent = '已取消';
+      showToast('同步已取消');
+      area.classList.remove('show');
+      area.classList.add('exit');
+      setTimeout(() => area.classList.remove('exit'), 350);
+      return;
+    }
 
     let msg = `同步完成：${s.updated} 更新`;
     if (s.failed > 0) msg += `，${s.failed} 失败`;
     if (s.skipped > 0) msg += `，${s.skipped} 跳过`;
     showToast(msg);
 
-    // Fade out progress area, then refresh
+    // 同步过程中的 SSE 已经逐行更新状态，这里只刷新日志，并补一次后台状态刷新避免缓存停留在扫描态。
     area.classList.remove('show');
     area.classList.add('exit');
     setTimeout(() => {
-      loadAll();
+      loadRecentLogs();
+      refreshStatuses({ silent: true }).catch(() => {});
       area.classList.remove('exit');
     }, 350);
   });
+}
+
+function cancelSync() {
+  if (!thisSyncSession || !isSyncing) return;
+  showToast('正在取消同步...');
+  apiPost(`/api/sync/cancel/${thisSyncSession}`).catch(() => {});
+}
+
+function appendSyncLog(name, outcome, message) {
+  const el = document.getElementById('recentLog');
+  const row = document.createElement('div');
+  if (outcome === 'FAILED' || outcome === 'INVALID') row.className = 'log-error';
+  else if (outcome === 'UPDATED') row.className = 'log-success';
+  else row.className = 'log-muted';
+  row.textContent = `${name}: ${message}`;
+  el.prepend(row);
 }
 
 function confirmForceSync() {
@@ -693,9 +817,6 @@ function closeConfirm() {
   el.classList.remove('open');
   el.classList.add('exit');
   setTimeout(() => el.classList.remove('exit'), 200);
-}
-function closeConfirm() {
-  document.getElementById('confirmOverlay').classList.remove('open');
 }
 async function doForceSync() {
   closeConfirm();
@@ -750,7 +871,7 @@ function renderFailedLog(data) {
   el.innerHTML = data.entries.map(e => {
     let text = e.name + ': ' + e.reason;
     if (e.suggestion) text += '；' + e.suggestion;
-    return `<div class="log-error">${text}</div>`;
+    return `<div class="log-error">${escapeHtml(text)}</div>`;
   }).join('');
 }
 
@@ -760,7 +881,7 @@ function renderRecentLog(data) {
     el.innerHTML = '<span class="log-muted">暂无日志</span>';
     return;
   }
-  el.innerHTML = data.raw.split('\n').map(line => `<div>${line}</div>`).join('');
+  el.innerHTML = data.raw.split('\n').map(line => `<div>${escapeHtml(line)}</div>`).join('');
 }
 
 async function loadRecentLogs() {
@@ -824,25 +945,30 @@ function renderSettingsForm() {
     </div>
     <div class="form-row">
       <label>日志保留天数</label>
-      <input type="number" id="s_log_retention" value="${settingsData.log_retention_days}" min="1">
+      <input type="number" id="s_log_days" value="${settingsData.log_retention_days}" min="1">
     </div>
-  `;
+    <div class="form-row">
+      <label>代理端口</label>
+      <input type="number" id="s_proxy_port" value="${settingsData.proxy_port}" min="1">
+    </div>`;
 }
 
 async function saveSettings() {
-  const body = {
-    concurrent_limit: parseInt(document.getElementById('s_concurrent').value) || 3,
-    command_timeout_seconds: parseInt(document.getElementById('s_timeout').value) || 120,
+  const payload = {
+    concurrent_limit: Number(document.getElementById('s_concurrent').value || 1),
+    command_timeout_seconds: Number(document.getElementById('s_timeout').value || 10),
     skip_uncommitted_changes: document.getElementById('s_skip_uncommitted').checked,
     skip_untracked_files: document.getElementById('s_skip_untracked').checked,
-    log_retention_days: parseInt(document.getElementById('s_log_retention').value) || 30,
+    log_retention_days: Number(document.getElementById('s_log_days').value || 1),
+    proxy_port: Number(document.getElementById('s_proxy_port').value || 1),
   };
   try {
-    await apiPut('/api/settings', body);
+    await apiPut('/api/settings', payload);
     showToast('设置已保存');
     closeSettings();
+    await refreshStatuses({ silent: true });
   } catch(e) {
-    showToast('保存设置失败：' + e.message);
+    showToast('保存失败：' + e.message);
   }
 }
 

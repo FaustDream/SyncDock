@@ -14,12 +14,14 @@ from syncdock.sync_engine import SyncResult
 
 
 class SSEManager:
-    """管理多个同步 session 的事件队列，线程安全。"""
+    """管理多个同步 session 的事件队列与取消标记，线程安全。"""
 
     def __init__(self) -> None:
         self._queues: dict[str, queue.Queue] = {}
         self._lock = threading.Lock()
         self._counter: dict[str, int] = {}
+        self._cancelled: set[str] = set()
+
 
     def create_session(self) -> str:
         """创建一个新的同步 session，返回 session_id。"""
@@ -34,26 +36,41 @@ class SSEManager:
         with self._lock:
             return self._queues.get(session_id)
 
+    def cancel_session(self, session_id: str) -> None:
+        """标记指定 session 为已取消，后台线程将在下一个仓库分片前退出。"""
+        with self._lock:
+            self._cancelled.add(session_id)
+
+    def is_cancelled(self, session_id: str) -> bool:
+        """检查指定 session 是否已被取消（线程安全）。"""
+        with self._lock:
+            return session_id in self._cancelled
+
     def make_callback(self, session_id: str, total: int):
         """生成一个 progress_callback，绑定到指定 session 的队列。
 
         返回的 callback 可与 sync_engine 的 progress_callback 参数对接。
+        调用时可传入 ``phase`` 关键字参数（如 ``phase="scanning"``），
+        不传时事件中不包含 ``phase`` 字段，保持向后兼容。
         """
-        def callback(result: SyncResult) -> None:
+        def callback(result: SyncResult, *, phase: str | None = None) -> None:
             with self._lock:
                 q = self._queues.get(session_id)
                 if q is None:
                     return
                 self._counter[session_id] += 1
                 current = self._counter[session_id]
-            q.put({
+            event = {
                 "event": "progress",
                 "name": result.name,
                 "outcome": result.outcome,
                 "message": result.message,
                 "progress": current,
                 "total": total,
-            })
+            }
+            if phase is not None:
+                event["phase"] = phase
+            q.put(event)
 
         return callback
 
@@ -65,10 +82,11 @@ class SSEManager:
         q.put({"event": "complete", "summary": summary})
 
     def cleanup(self, session_id: str) -> None:
-        """清理 session 数据。"""
+        """清理 session 数据，包括取消标记。"""
         with self._lock:
             self._queues.pop(session_id, None)
             self._counter.pop(session_id, None)
+            self._cancelled.discard(session_id)
 
     @property
     def active_sessions(self) -> int:

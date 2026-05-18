@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import os
 from pathlib import Path
 import subprocess
 
@@ -55,7 +54,14 @@ class RepositoryChecker:
                 "status_code": "invalid_path",
             }
 
-        health = self._run_git(path, "rev-parse", "--is-inside-work-tree")
+        local_timeout = min(20, max(5, settings.command_timeout_seconds))
+        health = self._run_git(
+            path,
+            "rev-parse",
+            "--is-inside-work-tree",
+            timeout_seconds=local_timeout,
+            proxy_port=settings.proxy_port,
+        )
         if not health or health.stdout.strip() != "true":
             return {
                 "kind": "invalid",
@@ -64,7 +70,13 @@ class RepositoryChecker:
                 "status_code": "not_git_repository",
             }
 
-        branch = self._run_git(path, "branch", "--show-current")
+        branch = self._run_git(
+            path,
+            "branch",
+            "--show-current",
+            timeout_seconds=local_timeout,
+            proxy_port=settings.proxy_port,
+        )
         branch_name = branch.stdout.strip() if branch else ""
         if not branch_name:
             return {
@@ -74,8 +86,22 @@ class RepositoryChecker:
                 "status_code": "detached_head",
             }
 
-        status_result = self._run_git(path, "status", "--porcelain")
-        lines = status_result.stdout.splitlines() if status_result else []
+        status_result = self._run_git(
+            path,
+            "status",
+            "--porcelain",
+            timeout_seconds=local_timeout,
+            proxy_port=settings.proxy_port,
+        )
+        if status_result is None:
+            return {
+                "kind": "failed",
+                "message": "查询本地状态失败，Git 命令执行失败",
+                "needs_pull": False,
+                "status_code": "local_status_failed",
+                "branch_name": branch_name,
+            }
+        lines = status_result.stdout.splitlines()
         parsed_status = parse_status_lines(lines)
         if (
             settings.skip_uncommitted_changes
@@ -98,7 +124,15 @@ class RepositoryChecker:
                 "branch_name": branch_name,
             }
 
-        upstream = self._run_git(path, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
+        upstream = self._run_git(
+            path,
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            "@{upstream}",
+            timeout_seconds=local_timeout,
+            proxy_port=settings.proxy_port,
+        )
         if not upstream:
             return {
                 "kind": "skipped",
@@ -121,14 +155,48 @@ class RepositoryChecker:
                     "upstream_name": upstream_name,
                 }
 
-        counts = self._run_git(path, "rev-list", "--left-right", "--count", "HEAD...@{upstream}")
+        counts = self._run_git(
+            path,
+            "rev-list",
+            "--left-right",
+            "--count",
+            "HEAD...@{upstream}",
+            timeout_seconds=local_timeout,
+            proxy_port=settings.proxy_port,
+        )
         ahead = 0
         behind = 0
-        if counts:
-            parts = counts.stdout.split()
-            if len(parts) == 2:
-                ahead = int(parts[0])
-                behind = int(parts[1])
+        if counts is None:
+            return {
+                "kind": "failed",
+                "message": "查询分支差异失败，Git 命令执行失败",
+                "needs_pull": False,
+                "status_code": "branch_compare_failed",
+                "branch_name": branch_name,
+                "upstream_name": upstream_name,
+            }
+        parts = counts.stdout.split()
+        if len(parts) != 2:
+            return {
+                "kind": "failed",
+                "message": "查询分支差异失败，Git 输出格式异常",
+                "needs_pull": False,
+                "status_code": "branch_compare_failed",
+                "branch_name": branch_name,
+                "upstream_name": upstream_name,
+            }
+        try:
+            ahead = int(parts[0])
+            behind = int(parts[1])
+        except ValueError:
+            return {
+                "kind": "failed",
+                "message": "查询分支差异失败，Git 输出格式异常",
+                "needs_pull": False,
+                "status_code": "branch_compare_failed",
+                "branch_name": branch_name,
+                "upstream_name": upstream_name,
+            }
 
         if ahead > 0 and behind > 0 and not ignore_divergence:
             return {
@@ -214,10 +282,17 @@ class RepositoryChecker:
             *args,
         ]
 
-    def _run_git(self, cwd: Path, *args: str) -> subprocess.CompletedProcess | None:
+    def _run_git(
+        self,
+        cwd: Path,
+        *args: str,
+        timeout_seconds: int | None = None,
+        proxy_port: int | None = None,
+    ) -> subprocess.CompletedProcess | None:
         try:
+            # 本地状态命令也设置短超时，避免异常仓库、磁盘卡顿或 Git 进程挂起拖住整个状态查询。
             return subprocess.run(
-                ["git", *args],
+                self._build_command(list(args), proxy_port),
                 cwd=cwd,
                 check=True,
                 stdout=subprocess.PIPE,
@@ -225,9 +300,11 @@ class RepositoryChecker:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
+                timeout=timeout_seconds,
             )
-        except subprocess.CalledProcessError:
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             return None
+
 
 
 def format_status_detail(repository: RepositoryConfig, inspection: dict) -> str:
