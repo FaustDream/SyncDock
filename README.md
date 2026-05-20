@@ -167,7 +167,7 @@ py -3 -m syncdock.main --silent
 - `syncdock/gui/`：GUI 服务端（FastAPI + SSE）和前端静态页
 - `config/`：本地配置文件
 - `logs/`：运行日志
-- `tests/`：测试套件（39 个测试，覆盖并发执行器、RepositoryChecker 失败语义、前端文本转义、SSE 管理、状态缓存）
+- `tests/`：测试套件（46 个测试，覆盖并发执行器、GUI 同步后台任务、RepositoryChecker 失败语义、前端文本转义、SSE 管理、状态缓存）
 - `run-gui.vbs`：GUI 模式启动脚本
 - `run-sync.bat`：交互菜单启动脚本
 - `run-sync-silent.bat`：静默同步启动脚本
@@ -179,15 +179,16 @@ py -3 -m syncdock.main --silent
 py -3 -m pytest tests/ -v
 ```
 
-当前共 39 个测试：
+当前共 46 个测试：
 
 | 模块 | 数量 | 覆盖内容 |
 |---|---|---|
-| `test_sync_engine.py` | 8 | 保序、异常隔离、回调、取消门禁、并发下限、硬上限 |
+| `test_sync_engine.py` | 10 | 保序、异常隔离、回调、取消门禁、有界提交、全部同步取消透传、并发下限、硬上限 |
+| `test_gui_server_sync.py` | 2 | `needed` 模式扫描汇总、服务端同步互斥 |
 | `test_repo_checker.py` | 2 | Git 本地状态和分支差异查询失败语义 |
 | `test_frontend_rendering.py` | 1 | 前端不可信文本转义约束 |
-| `test_sse_manager.py` | 16 | session 生命周期、取消、phase 事件 |
-| `test_status_cache.py` | 14 | TTL、快照、占位、裁剪、覆盖、清除 |
+| `test_sse_manager.py` | 17 | session 生命周期、取消、phase 事件、精确状态码传递 |
+| `test_status_cache.py` | 16 | TTL、快照、占位、裁剪、覆盖、扫描态映射、精确状态码映射、清除 |
 
 ## 许可证
 

@@ -71,11 +71,14 @@ def _is_sync_running() -> bool:
         return _SYNC_ACTIVE_COUNT > 0
 
 
-def _increment_sync_count() -> None:
-    """启动同步时增加同步计数器。"""
+def _try_mark_sync_started() -> bool:
+    """尝试登记一个同步任务；已有任务运行时拒绝新的同步 session。"""
     with _SYNC_GLOBAL_LOCK:
         global _SYNC_ACTIVE_COUNT
+        if _SYNC_ACTIVE_COUNT > 0:
+            return False
         _SYNC_ACTIVE_COUNT += 1
+        return True
 
 
 def _decrement_sync_count() -> None:
@@ -84,11 +87,6 @@ def _decrement_sync_count() -> None:
         global _SYNC_ACTIVE_COUNT
         if _SYNC_ACTIVE_COUNT > 0:
             _SYNC_ACTIVE_COUNT -= 1
-
-# 全局互斥：同步与状态刷新
-_SYNC_GLOBAL_LOCK = threading.Lock()
-_SYNC_ACTIVE_COUNT = 0       # 当前正在运行的同步线程数
-
 
 def _get_runtime() -> RuntimeConfig:
     global _current_runtime
@@ -232,9 +230,16 @@ def _sync_worker_for_mode(mode: str, settings_obj: SettingsConfig):
 def _inspection_to_result(repo: RepositoryConfig, inspection: dict) -> SyncResult:
     """把扫描阶段的非同步状态转换为进度事件，确保 needed 模式检查期也有可见反馈。"""
     outcome_map = {"invalid": "INVALID", "skipped": "SKIPPED", "failed": "FAILED"}
-    if inspection["kind"] == "ready" and not inspection.get("needs_pull"):
-        return SyncResult(repo.name, "UP_TO_DATE", inspection["message"])
-    return SyncResult(repo.name, outcome_map.get(inspection["kind"], "SKIPPED"), inspection["message"])
+    if inspection["kind"] == "ready" and inspection.get("needs_pull"):
+        return SyncResult(repo.name, "NEEDS_SYNC", inspection["message"], inspection.get("status_code"))
+    if inspection["kind"] == "ready":
+        return SyncResult(repo.name, "UP_TO_DATE", inspection["message"], inspection.get("status_code"))
+    return SyncResult(
+        repo.name,
+        outcome_map.get(inspection["kind"], "SKIPPED"),
+        inspection["message"],
+        inspection.get("status_code"),
+    )
 
 
 def _collect_needed_repositories_in_background(
@@ -294,11 +299,10 @@ def _run_sync_in_background(
     # 构造取消检查器，供 run_repositories_concurrently 在提交新分片时检查。
     cancelled_checker = lambda: sse_manager.is_cancelled(session_id)
 
-    def _phase_wrapper(base_callback, phase: str):
+    def _phase_wrapper(base_callback, phase: str, *, cache_result: bool):
         """给进度事件补充阶段字段，不改变原有事件结构。"""
         def wrapped(result: SyncResult) -> None:
-            _cache_status_from_sync_result(result)
-            base_callback(result, phase=phase)
+            base_callback(result, phase=phase, cache_result=cache_result)
         return wrapped
 
     try:
@@ -309,13 +313,19 @@ def _run_sync_in_background(
         total = len(repositories)
         raw_callback = sse_manager.make_callback(session_id, total)
 
-        def callback_with_phase(result: SyncResult, phase: str | None = None) -> None:
-            _cache_status_from_sync_result(result)
+        def callback_with_phase(
+            result: SyncResult,
+            phase: str | None = None,
+            *,
+            cache_result: bool = True,
+        ) -> None:
+            if cache_result:
+                _cache_status_from_sync_result(result)
             raw_callback(result, phase=phase)
 
         if mode == "needed":
             # 扫描阶段：phase=scanning
-            scan_callback = _phase_wrapper(callback_with_phase, "scanning")
+            scan_callback = _phase_wrapper(callback_with_phase, "scanning", cache_result=False)
             sync_targets, scan_results = _collect_needed_repositories_in_background(
                 repositories,
                 settings_obj,
@@ -327,7 +337,7 @@ def _run_sync_in_background(
                 return
             # 同步阶段：phase=syncing
             if sync_targets:
-                sync_callback = _phase_wrapper(callback_with_phase, "syncing")
+                sync_callback = _phase_wrapper(callback_with_phase, "syncing", cache_result=True)
                 sync_results = run_repositories_concurrently(
                     sync_targets,
                     settings_obj,
@@ -337,7 +347,7 @@ def _run_sync_in_background(
                 )
             else:
                 sync_results = []
-            results = [item for item in scan_results if item.outcome != "UP_TO_DATE"] + sync_results
+            results = [item for item in scan_results if item.outcome not in {"UP_TO_DATE", "NEEDS_SYNC"}] + sync_results
         elif mode == "all":
             results = sync_all_repositories(
                 repositories,
@@ -345,6 +355,7 @@ def _run_sync_in_background(
                 checker=_checker,
                 git_runner=_git_runner,
                 progress_callback=lambda r: callback_with_phase(r),
+                is_cancelled=cancelled_checker,
             )
         else:
             if sse_manager.is_cancelled(session_id):
@@ -420,8 +431,10 @@ async def start_sync(payload: SyncRequest):
         raise HTTPException(400, f"无效的同步模式：{payload.mode}")
 
     session_id = sse_manager.create_session()
-    # 同步开始前递增计数器，让状态刷新接口感知到同步正在进行。
-    _increment_sync_count()
+    # 同步任务必须服务端互斥，避免多个页面或脚本同时操作同一批 Git 仓库。
+    if not _try_mark_sync_started():
+        sse_manager.cleanup(session_id)
+        raise HTTPException(409, "已有同步任务正在运行")
     thread = threading.Thread(
         target=_run_sync_in_background,
         args=(session_id, target, runtime.settings),

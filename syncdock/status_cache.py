@@ -154,9 +154,18 @@ class StatusCache:
 
         用此方法回写缓存后，同步完成时的状态立即可靠，无需再次远端查询。
         """
+        if result.status_code:
+            return {
+                "name": result.name,
+                "status_code": result.status_code,
+                "status_label": result.message,
+                "detail": result.message,
+                "fetched_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            }
         outcome_map = {
             "UPDATED": ("up_to_date", "已经是最新"),
             "UP_TO_DATE": ("up_to_date", "已经是最新"),
+            "NEEDS_SYNC": ("needs_sync", "需要同步"),
             "FAILED": ("remote_refresh_failed", "同步失败"),
             "SKIPPED": ("local_changes", "已跳过"),
             "INVALID": ("invalid_path", "仓库无效"),

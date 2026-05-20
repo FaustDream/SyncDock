@@ -205,7 +205,12 @@ def _inspection_to_result(repository, inspection: dict) -> SyncResult:
         "skipped": "SKIPPED",
         "failed": "FAILED",
     }
-    return SyncResult(repository.name, outcome_map[inspection["kind"]], inspection["message"])
+    return SyncResult(
+        repository.name,
+        outcome_map[inspection["kind"]],
+        inspection["message"],
+        inspection.get("status_code"),
+    )
 
 
 def _inspect_repository_for_sync(repository, settings, checker) -> dict:

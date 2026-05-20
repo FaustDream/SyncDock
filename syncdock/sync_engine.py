@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 import subprocess
 
@@ -13,6 +13,7 @@ class SyncResult:
     name: str
     outcome: str
     message: str
+    status_code: str | None = None
 
 
 SyncWorker = Callable[[RepositoryConfig], SyncResult]
@@ -83,15 +84,20 @@ def summarize_results(results: list[SyncResult]) -> dict[str, int]:
     return summary
 
 
+def _result_from_inspection(repository: RepositoryConfig, outcome: str, inspection: dict) -> SyncResult:
+    """把仓库检查结果转换为同步结果，同时保留精确状态码供 GUI 缓存复用。"""
+    return SyncResult(repository.name, outcome, inspection["message"], inspection.get("status_code"))
+
+
 def sync_single_repository(repository: RepositoryConfig, settings: SettingsConfig, *, checker, git_runner) -> SyncResult:
     inspection = checker.inspect(repository, settings)
 
     if inspection["kind"] == "invalid":
-        return SyncResult(repository.name, "INVALID", inspection["message"])
+        return _result_from_inspection(repository, "INVALID", inspection)
     if inspection["kind"] == "skipped":
-        return SyncResult(repository.name, "SKIPPED", inspection["message"])
+        return _result_from_inspection(repository, "SKIPPED", inspection)
     if inspection["kind"] == "failed":
-        return SyncResult(repository.name, "FAILED", inspection["message"])
+        return _result_from_inspection(repository, "FAILED", inspection)
 
     fetch_ok, fetch_message = git_runner.run(
         repository.path,
@@ -104,13 +110,13 @@ def sync_single_repository(repository: RepositoryConfig, settings: SettingsConfi
 
     inspection = checker.inspect(repository, settings)
     if inspection["kind"] == "invalid":
-        return SyncResult(repository.name, "INVALID", inspection["message"])
+        return _result_from_inspection(repository, "INVALID", inspection)
     if inspection["kind"] == "skipped":
-        return SyncResult(repository.name, "SKIPPED", inspection["message"])
+        return _result_from_inspection(repository, "SKIPPED", inspection)
     if inspection["kind"] == "failed":
-        return SyncResult(repository.name, "FAILED", inspection["message"])
+        return _result_from_inspection(repository, "FAILED", inspection)
     if inspection.get("status_code") == "ahead_only":
-        return SyncResult(repository.name, "SKIPPED", inspection["message"])
+        return _result_from_inspection(repository, "SKIPPED", inspection)
     if not inspection["needs_pull"]:
         return SyncResult(repository.name, "UP_TO_DATE", "已经是最新")
 
@@ -136,11 +142,11 @@ def force_sync_single_repository(repository: RepositoryConfig, settings: Setting
     )
 
     if inspection["kind"] == "invalid":
-        return SyncResult(repository.name, "INVALID", inspection["message"])
+        return _result_from_inspection(repository, "INVALID", inspection)
     if inspection["kind"] == "skipped":
-        return SyncResult(repository.name, "SKIPPED", inspection["message"])
+        return _result_from_inspection(repository, "SKIPPED", inspection)
     if inspection["kind"] == "failed":
-        return SyncResult(repository.name, "FAILED", inspection["message"])
+        return _result_from_inspection(repository, "FAILED", inspection)
 
     fetch_ok, fetch_message = git_runner.run(
         repository.path,
@@ -195,33 +201,51 @@ def run_repositories_concurrently(
     results: list[SyncResult | None] = [None] * len(repositories)
     # Git 子进程是全局资源，用户配置过大时仍需受硬上限保护。
     max_workers = min(HARD_MAX_GIT_PROCESSES, max(1, settings.concurrent_limit))
+    next_index = 0
+
+    def mark_remaining_cancelled(start_index: int) -> None:
+        """把尚未提交到线程池的仓库标记为已取消，避免继续启动 Git 子进程。"""
+        for remaining_index in range(start_index, len(repositories)):
+            if results[remaining_index] is not None:
+                continue
+            results[remaining_index] = SyncResult(
+                repositories[remaining_index].name,
+                "SKIPPED",
+                "已取消",
+            )
+            if progress_callback is not None:
+                progress_callback(results[remaining_index])
+
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         future_to_index = {}
-        for index, repository in enumerate(repositories):
-            # 在提交每个新分片前检查取消标记，已提交的继续完成。
-            if is_cancelled is not None and is_cancelled():
-                # 将剩余未提交的仓库标记为 SKIPPED 并跳过调度。
-                for remaining_index in range(index, len(repositories)):
-                    results[remaining_index] = SyncResult(
-                        repositories[remaining_index].name,
-                        "SKIPPED",
-                        "已取消",
-                    )
-                    if progress_callback is not None:
-                        progress_callback(results[remaining_index])
-                break
-            future_to_index[pool.submit(worker, repository)] = index
 
-        for future in as_completed(future_to_index):
-            index = future_to_index[future]
-            repository = repositories[index]
-            try:
-                result = future.result()
-            except Exception as exc:
-                result = SyncResult(repository.name, "FAILED", f"同步失败，执行异常：{exc}")
-            results[index] = result
-            if progress_callback is not None:
-                progress_callback(result)
+        def submit_until_full() -> None:
+            """维持有界队列：只提交可立即运行的分片，取消后不再塞满等待队列。"""
+            nonlocal next_index
+            while len(future_to_index) < max_workers and next_index < len(repositories):
+                # 在提交每个新分片前检查取消标记，已提交的继续完成。
+                if is_cancelled is not None and is_cancelled():
+                    mark_remaining_cancelled(next_index)
+                    next_index = len(repositories)
+                    return
+                future_to_index[pool.submit(worker, repositories[next_index])] = next_index
+                next_index += 1
+
+        submit_until_full()
+
+        while future_to_index:
+            done, _ = wait(future_to_index, return_when=FIRST_COMPLETED)
+            for future in done:
+                index = future_to_index.pop(future)
+                repository = repositories[index]
+                try:
+                    result = future.result()
+                except Exception as exc:
+                    result = SyncResult(repository.name, "FAILED", f"同步失败，执行异常：{exc}")
+                results[index] = result
+                if progress_callback is not None:
+                    progress_callback(result)
+            submit_until_full()
     return [item for item in results if item is not None]
 
 
@@ -232,6 +256,7 @@ def sync_all_repositories(
     checker,
     git_runner,
     progress_callback=None,
+    is_cancelled: Callable[[], bool] | None = None,
 ) -> list[SyncResult]:
     enabled = [item for item in repositories if item.enabled]
 
@@ -239,4 +264,10 @@ def sync_all_repositories(
         # 同步策略由仓库配置决定，线程池只负责调度，不改变安全/强制同步语义。
         return sync_repository_by_policy(repository, settings, checker=checker, git_runner=git_runner)
 
-    return run_repositories_concurrently(enabled, settings, worker, progress_callback=progress_callback)
+    return run_repositories_concurrently(
+        enabled,
+        settings,
+        worker,
+        progress_callback=progress_callback,
+        is_cancelled=is_cancelled,
+    )

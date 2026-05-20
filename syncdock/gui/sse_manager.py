@@ -68,6 +68,8 @@ class SSEManager:
                 "progress": current,
                 "total": total,
             }
+            if result.status_code is not None:
+                event["status_code"] = result.status_code
             if phase is not None:
                 event["phase"] = phase
             q.put(event)

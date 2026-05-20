@@ -688,8 +688,13 @@ function updateRepoStatusFromSync(data) {
   if (!row) {
     row = { name:data.name, status_code:'unknown', status_label:'等待刷新', detail:'' };
   }
-  if (data.outcome === 'UPDATED' || data.outcome === 'UP_TO_DATE') {
+  if (data.status_code) {
+    row.status_code = data.status_code;
+    row.status_label = data.message || STATUS_LABELS[data.status_code] || '状态未知';
+  } else if (data.outcome === 'UPDATED' || data.outcome === 'UP_TO_DATE') {
     row.status_code = 'up_to_date'; row.status_label = '已经是最新';
+  } else if (data.outcome === 'NEEDS_SYNC') {
+    row.status_code = 'needs_sync'; row.status_label = '需要同步';
   } else if (data.outcome === 'FAILED') {
     row.status_code = 'remote_refresh_failed'; row.status_label = '同步失败';
   } else if (data.outcome === 'SKIPPED') {
