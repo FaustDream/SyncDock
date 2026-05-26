@@ -32,6 +32,13 @@
 - 调整 `.gitignore`，不再忽略 `tests/` 和 `docs/`，让测试套件与项目上下文文档可进入 Git 协作范围。
 - 已新增 7 个回归测试，测试总数更新为 46 个；`py -3 -m pytest tests/ -v` 与 `py -3 -m compileall syncdock` 均通过。
 
+## 2026-05-26
+
+- 修复 `run-gui.vbs` 从非仓库目录双击或调用时无法启动的问题：启动器现在根据 `WScript.ScriptFullName` 定位项目根目录，并在运行 `gui_launcher.py` 前显式设置当前工作目录。
+- 同步修复 VBS 启动脚本的编码兼容问题：脚本运行期内容保持 ASCII，避免 Windows Script Host 将 UTF-8 中文注释按 ANSI 解析后触发编译错误。
+- 修复 GUI 固定端口在 Windows 端口排除范围内无法绑定的问题：`gui_launcher.py` 现在优先使用 `8866`，不可绑定时自动扫描邻近可用端口，并打开实际 GUI 地址。
+- 新增 `tests/test_gui_launcher.py` 覆盖默认端口优先和端口 fallback，测试总数更新为 48 个。
+
 
 
 

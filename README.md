@@ -53,7 +53,7 @@ py -3 -m pip install -r requirements.txt
 .\run-gui.vbs
 ```
 
-启动后浏览器自动打开 `http://localhost:8866`，提供完整的仓库管理和同步操作界面。
+启动后浏览器优先自动打开 `http://localhost:8866`，如果该端口被 Windows 保留或占用，启动器会自动改用邻近可用端口并打开实际地址。
 
 ### CLI 交互菜单
 
@@ -167,7 +167,7 @@ py -3 -m syncdock.main --silent
 - `syncdock/gui/`：GUI 服务端（FastAPI + SSE）和前端静态页
 - `config/`：本地配置文件
 - `logs/`：运行日志
-- `tests/`：测试套件（46 个测试，覆盖并发执行器、GUI 同步后台任务、RepositoryChecker 失败语义、前端文本转义、SSE 管理、状态缓存）
+- `tests/`：测试套件（48 个测试，覆盖并发执行器、GUI 启动器、GUI 同步后台任务、RepositoryChecker 失败语义、前端文本转义、SSE 管理、状态缓存）
 - `run-gui.vbs`：GUI 模式启动脚本
 - `run-sync.bat`：交互菜单启动脚本
 - `run-sync-silent.bat`：静默同步启动脚本
@@ -179,11 +179,12 @@ py -3 -m syncdock.main --silent
 py -3 -m pytest tests/ -v
 ```
 
-当前共 46 个测试：
+当前共 48 个测试：
 
 | 模块 | 数量 | 覆盖内容 |
 |---|---|---|
 | `test_sync_engine.py` | 10 | 保序、异常隔离、回调、取消门禁、有界提交、全部同步取消透传、并发下限、硬上限 |
+| `test_gui_launcher.py` | 2 | GUI 默认端口优先和 Windows 保留端口 fallback |
 | `test_gui_server_sync.py` | 2 | `needed` 模式扫描汇总、服务端同步互斥 |
 | `test_repo_checker.py` | 2 | Git 本地状态和分支差异查询失败语义 |
 | `test_frontend_rendering.py` | 1 | 前端不可信文本转义约束 |

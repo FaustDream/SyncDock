@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import re
+import socket
 import subprocess
 import sys
 import time
@@ -18,7 +19,12 @@ import webbrowser
 from pathlib import Path
 
 
-def _free_port(port: int = 8866) -> None:
+# 默认端口保持历史访问习惯；扫描上限用于绕开 Windows/Hyper-V 的连续保留端口段。
+DEFAULT_GUI_PORT = 8866
+PORT_SCAN_LIMIT = 200
+
+
+def _free_port(port: int = DEFAULT_GUI_PORT) -> None:
     """杀掉占用指定端口的进程。"""
     try:
         output = subprocess.check_output(
@@ -41,6 +47,30 @@ def _free_port(port: int = 8866) -> None:
         pass
 
 
+def _is_port_bindable(port: int) -> bool:
+    """检查本机 GUI 端口是否可绑定，覆盖 Windows 端口排除范围和已占用两类失败。"""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", port))
+    except OSError:
+        return False
+    return True
+
+
+def _find_gui_port(preferred: int = DEFAULT_GUI_PORT, scan_limit: int = PORT_SCAN_LIMIT) -> int:
+    """选择 GUI 服务端口；优先复用默认端口，不可绑定时向后扫描邻近端口。"""
+    _free_port(preferred)
+    if _is_port_bindable(preferred):
+        return preferred
+
+    # Windows/Hyper-V 可能保留连续端口段，逐个试探比依赖 netstat 更可靠。
+    for port in range(preferred + 1, preferred + scan_limit + 1):
+        if _is_port_bindable(port):
+            return port
+
+    raise RuntimeError(f"No bindable GUI port found near {preferred}")
+
+
 def _wait_for_server(url: str, timeout: float = 10) -> bool:
     """轮询直到服务器就绪。"""
     deadline = time.monotonic() + timeout
@@ -57,23 +87,24 @@ def main() -> None:
     root = Path(__file__).resolve().parent
     os.chdir(root)
 
-    # 清理旧进程
-    _free_port(8866)
+    port = _find_gui_port()
+    base_url = f"http://127.0.0.1:{port}"
+    browser_url = f"http://localhost:{port}"
 
     # 启动 uvicorn
     proc = subprocess.Popen(
         [sys.executable, "-m", "uvicorn",
          "syncdock.gui.server:app",
-         "--host", "127.0.0.1", "--port", "8866"],
+         "--host", "127.0.0.1", "--port", str(port)],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
 
     # 等服务器就绪
-    ready = _wait_for_server("http://127.0.0.1:8866/")
+    ready = _wait_for_server(f"{base_url}/")
 
     # 开浏览器
-    webbrowser.open("http://localhost:8866")
+    webbrowser.open(browser_url)
 
     # 保持运行，等服务器退出
     # 用户点击页面上的"关闭服务"→ 服务器退出 → proc.wait() 返回 → 启动器退出

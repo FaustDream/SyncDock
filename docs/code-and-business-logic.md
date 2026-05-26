@@ -21,7 +21,7 @@
 
 ### 2.2 GUI 链路
 
-1. `gui_launcher.py` 清理本机 `8866` 端口占用，启动 `uvicorn syncdock.gui.server:app`。
+1. `gui_launcher.py` 优先清理并使用本机 `8866` 端口；若端口被 Windows 保留或占用，则自动扫描邻近可绑定端口并启动 `uvicorn syncdock.gui.server:app`。
 2. `syncdock/gui/server.py` 提供静态页面、REST API、SSE 进度流。
 3. 前端 `index.html` 通过 `fetch()` 调用 REST API，通过 `EventSource` 订阅同步进度。
 4. 后端同步任务在后台线程中运行，内部仍复用 `sync_engine` 和 `repo_checker`。
@@ -288,6 +288,7 @@ tests/
   __init__.py
   conftest.py            # 共享 fixture：settings、sample_repos、mixed_repos
   test_sync_engine.py    # 10 个测试：保序、异常隔离、回调、取消门禁、有界提交、全部同步取消透传、并发下限
+  test_gui_launcher.py   # 2 个测试：默认端口优先、保留端口自动 fallback
   test_gui_server_sync.py # 2 个测试：needed 扫描汇总、服务端同步互斥
   test_repo_checker.py   # 2 个测试：Git 本地状态和分支差异查询失败语义
   test_frontend_rendering.py # 1 个测试：前端不可信文本转义约束
@@ -298,6 +299,7 @@ tests/
 覆盖范围：
 
 - 并发执行器 `run_repositories_concurrently` 的保序、异常隔离、回调计数、取消门禁。
+- GUI 启动器在默认端口可用时保持稳定入口，在 Windows 端口排除范围命中时自动改用可绑定端口。
 - `SSEManager` 的 session 创建/清理/取消/phase 事件。
 - `StatusCache` 的 TTL 命中、过期标记、快照元数据、占位状态、裁剪。
 
@@ -308,7 +310,7 @@ cd SyncDock
 pytest tests/ -v
 ```
 
-当前共 46 个测试，全部通过。
+当前共 48 个测试，全部通过。
 
 
 ## 5. 业务规则汇总
@@ -347,11 +349,11 @@ pytest tests/ -v
 5. 已引入内存级状态缓存（`StatusCache`），TTL 60 秒，同步结果和状态刷新结果均回写缓存。
 6. 已实现任务取消机制（`cancel_session` / `is_cancelled`），前端进度条旁有取消按钮；并发执行器取消后不会继续提交尚未开始的仓库分片。
 7. 已实现全局互斥：同步任务运行时状态刷新降级为缓存读取，服务端也会拒绝并发同步 session。
-8. 已建立 TDD 测试套件（46 个测试，覆盖并发执行器、GUI 同步后台任务、RepositoryChecker 失败语义、前端文本转义、SSEManager、StatusCache）。
+8. 已建立 TDD 测试套件（48 个测试，覆盖并发执行器、GUI 启动器、GUI 同步后台任务、RepositoryChecker 失败语义、前端文本转义、SSEManager、StatusCache）。
 
 ## 7. 验证记录
 
 本次文档更新前执行了以下验证：
 
-- `python -m compileall -q syncdock gui_launcher.py`：通过，未发现 Python 语法错误。
-- `python -m pytest tests/ -v`：46 个测试全部通过（0.52s）。
+- `py -3 -m compileall -q syncdock gui_launcher.py`：通过，未发现 Python 语法错误。
+- `py -3 -m pytest tests/ -q`：48 个测试全部通过（0.57s）。
