@@ -200,7 +200,7 @@ class SettingsItem(BaseModel):
     skip_uncommitted_changes: bool = True
     skip_untracked_files: bool = False
     log_retention_days: int = 30
-    proxy_port: int = 28203
+    proxy_ports: list[int] = [28203]
 
 
 # ═══════════════════════════════════════════════════
@@ -789,7 +789,7 @@ async def get_settings():
         "skip_uncommitted_changes": s.skip_uncommitted_changes,
         "skip_untracked_files": s.skip_untracked_files,
         "log_retention_days": s.log_retention_days,
-        "proxy_port": s.proxy_port,
+        "proxy_ports": s.proxy_ports,
     }
 
 

@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import logging
 import subprocess
 
 from syncdock.advice_service import get_sync_suggestion
 from syncdock.config_service import RepositoryConfig, SettingsConfig
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -60,7 +63,7 @@ class RepositoryChecker:
             "rev-parse",
             "--is-inside-work-tree",
             timeout_seconds=local_timeout,
-            proxy_port=settings.proxy_port,
+            proxy_ports=settings.proxy_ports,
         )
         if not health or health.stdout.strip() != "true":
             return {
@@ -75,7 +78,7 @@ class RepositoryChecker:
             "branch",
             "--show-current",
             timeout_seconds=local_timeout,
-            proxy_port=settings.proxy_port,
+            proxy_ports=settings.proxy_ports,
         )
         branch_name = branch.stdout.strip() if branch else ""
         if not branch_name:
@@ -91,7 +94,7 @@ class RepositoryChecker:
             "status",
             "--porcelain",
             timeout_seconds=local_timeout,
-            proxy_port=settings.proxy_port,
+            proxy_ports=settings.proxy_ports,
         )
         if status_result is None:
             return {
@@ -131,7 +134,7 @@ class RepositoryChecker:
             "--symbolic-full-name",
             "@{upstream}",
             timeout_seconds=local_timeout,
-            proxy_port=settings.proxy_port,
+            proxy_ports=settings.proxy_ports,
         )
         if not upstream:
             return {
@@ -144,7 +147,7 @@ class RepositoryChecker:
         upstream_name = upstream.stdout.strip()
 
         if refresh_remote:
-            remote_status = self._refresh_remote(path, settings.command_timeout_seconds, settings.proxy_port)
+            remote_status = self._refresh_remote(path, settings.command_timeout_seconds, settings.proxy_ports)
             if remote_status is not None:
                 return {
                     "kind": "failed",
@@ -162,7 +165,7 @@ class RepositoryChecker:
             "--count",
             "HEAD...@{upstream}",
             timeout_seconds=local_timeout,
-            proxy_port=settings.proxy_port,
+            proxy_ports=settings.proxy_ports,
         )
         ahead = 0
         behind = 0
@@ -245,7 +248,41 @@ class RepositoryChecker:
             "behind_count": behind,
         }
 
-    def _refresh_remote(self, cwd: Path, timeout_seconds: int, proxy_port: int | None = None) -> str | None:
+    def _refresh_remote(self, cwd: Path, timeout_seconds: int, proxy_ports: list[int] | None = None) -> str | None:
+        """刷新远端仓库信息，支持多代理端口自动切换。"""
+        ports_to_try = proxy_ports or [None]
+
+        for i, port in enumerate(ports_to_try):
+            if i > 0:
+                logger.info("代理端口 %d 失败，尝试下一个端口 %d", ports_to_try[i - 1], port)
+            error = self._try_refresh_remote(cwd, timeout_seconds, port)
+            if error is None:
+                if i > 0:
+                    logger.info("代理端口 %d 连接成功", port)
+                return None
+            if not self._is_connection_error(error):
+                return error
+
+        return "所有代理端口均连接失败"
+
+    @staticmethod
+    def _is_connection_error(message: str) -> bool:
+        """判断是否为网络连接类错误（此类错误值得尝试下一个端口）。"""
+        msg = message.lower()
+        connection_keywords = [
+            "failed to connect",
+            "could not resolve host",
+            "connection refused",
+            "connection timed out",
+            "network is unreachable",
+            "no route to host",
+            "proxy connect",
+            "tunnel connection failed",
+            "could not resolve proxy",
+        ]
+        return any(kw in msg for kw in connection_keywords)
+
+    def _try_refresh_remote(self, cwd: Path, timeout_seconds: int, proxy_port: int | None) -> str | None:
         try:
             subprocess.run(
                 self._build_command(["fetch", "--all", "--prune"], proxy_port),
@@ -287,12 +324,37 @@ class RepositoryChecker:
         cwd: Path,
         *args: str,
         timeout_seconds: int | None = None,
-        proxy_port: int | None = None,
+        proxy_ports: list[int] | None = None,
+    ) -> subprocess.CompletedProcess | None:
+        """执行 Git 本地查询命令，支持多代理端口自动切换。
+
+        对于网络相关错误，自动尝试下一个端口；其他错误直接返回 None。
+        """
+        ports_to_try = proxy_ports or [None]
+
+        for i, port in enumerate(ports_to_try):
+            if i > 0:
+                logger.info("代理端口 %d 失败，尝试下一个端口 %d", ports_to_try[i - 1], port)
+            result = self._execute_single(cwd, list(args), timeout_seconds, port)
+            if result is not None:
+                if i > 0:
+                    logger.info("代理端口 %d 连接成功", port)
+                return result
+            # 只有网络错误才值得重试；本地 Git 命令（如 status、rev-parse）不需要代理，
+            # 这些命令传了 None port，不会触发重试逻辑。
+
+        return None
+
+    def _execute_single(
+        self,
+        cwd: Path,
+        args: list[str],
+        timeout_seconds: int | None,
+        proxy_port: int | None,
     ) -> subprocess.CompletedProcess | None:
         try:
-            # 本地状态命令也设置短超时，避免异常仓库、磁盘卡顿或 Git 进程挂起拖住整个状态查询。
             return subprocess.run(
-                self._build_command(list(args), proxy_port),
+                self._build_command(args, proxy_port),
                 cwd=cwd,
                 check=True,
                 stdout=subprocess.PIPE,

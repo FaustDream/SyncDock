@@ -954,18 +954,23 @@ function renderSettingsForm() {
     </div>
     <div class="form-row">
       <label>代理端口</label>
-      <input type="number" id="s_proxy_port" value="${settingsData.proxy_port}" min="1">
+      <input type="text" id="s_proxy_ports" value="${settingsData.proxy_ports.join(', ')}" placeholder="多个端口用逗号分隔，如 28203, 11304">
     </div>`;
 }
 
 async function saveSettings() {
+  const rawPorts = (document.getElementById('s_proxy_ports').value || '').trim();
+  const proxyPorts = rawPorts
+    ? rawPorts.split(/[,，\s]+/).map(s => parseInt(s, 10)).filter(n => !isNaN(n) && n > 0)
+    : [28203];
+
   const payload = {
     concurrent_limit: Number(document.getElementById('s_concurrent').value || 1),
     command_timeout_seconds: Number(document.getElementById('s_timeout').value || 10),
     skip_uncommitted_changes: document.getElementById('s_skip_uncommitted').checked,
     skip_untracked_files: document.getElementById('s_skip_untracked').checked,
     log_retention_days: Number(document.getElementById('s_log_days').value || 1),
-    proxy_port: Number(document.getElementById('s_proxy_port').value || 1),
+    proxy_ports: proxyPorts,
   };
   try {
     await apiPut('/api/settings', payload);

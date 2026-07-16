@@ -13,7 +13,7 @@ def _settings() -> SettingsConfig:
         skip_uncommitted_changes=True,
         skip_untracked_files=False,
         log_retention_days=30,
-        proxy_port=28203,
+        proxy_ports=[28203],
     )
 
 
@@ -41,7 +41,7 @@ class AlwaysNeedsSyncChecker:
 class SuccessfulGitRunner:
     """模拟 Git fetch/pull 均成功，避免测试依赖真实仓库。"""
 
-    def run(self, cwd, args, timeout_seconds, proxy_port=None):
+    def run(self, cwd, args, timeout_seconds, proxy_ports=None):
         return True, "ok"
 
 

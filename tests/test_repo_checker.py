@@ -17,7 +17,7 @@ class ScriptedChecker(RepositoryChecker):
     def __init__(self, failures: set[str]) -> None:
         self.failures = failures
 
-    def _run_git(self, cwd, *args, timeout_seconds=None, proxy_port=None):
+    def _run_git(self, cwd, *args, timeout_seconds=None, proxy_ports=None):
         command = " ".join(args)
         if command in self.failures:
             return None

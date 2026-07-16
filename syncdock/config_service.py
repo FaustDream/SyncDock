@@ -13,7 +13,7 @@ DEFAULT_SETTINGS = {
     "skip_uncommitted_changes": True,
     "skip_untracked_files": False,
     "log_retention_days": 30,
-    "proxy_port": 28203,
+    "proxy_ports": [28203],
 }
 
 
@@ -37,7 +37,7 @@ class SettingsConfig:
     skip_uncommitted_changes: bool
     skip_untracked_files: bool
     log_retention_days: int
-    proxy_port: int
+    proxy_ports: list[int]
 
 
 
@@ -148,13 +148,33 @@ def load_runtime_config(config_dir: Path, *, progress_factory=create_progress_ba
     if not repositories:
         raise ValueError("至少需要配置一个仓库")
 
+    # 兼容旧格式 proxy_port (int) 和新格式 proxy_ports (list[int])
+    raw_proxy = settings_raw.get("proxy_ports")
+    if raw_proxy is None:
+        # 尝试兼容旧格式
+        legacy_port = settings_raw.get("proxy_port")
+        if legacy_port is not None:
+            raw_proxy = [legacy_port]
+        else:
+            raw_proxy = DEFAULT_SETTINGS["proxy_ports"]
+
+    if isinstance(raw_proxy, list):
+        proxy_ports = [max(1, int(p)) for p in raw_proxy]
+    elif isinstance(raw_proxy, int):
+        proxy_ports = [max(1, raw_proxy)]
+    else:
+        proxy_ports = [max(1, int(raw_proxy))]
+
+    if not proxy_ports:
+        proxy_ports = DEFAULT_SETTINGS["proxy_ports"]
+
     settings = SettingsConfig(
         concurrent_limit=max(1, int(settings_raw["concurrent_limit"])),
         command_timeout_seconds=max(10, int(settings_raw["command_timeout_seconds"])),
         skip_uncommitted_changes=bool(settings_raw["skip_uncommitted_changes"]),
         skip_untracked_files=bool(settings_raw["skip_untracked_files"]),
         log_retention_days=max(1, int(settings_raw["log_retention_days"])),
-        proxy_port=max(1, int(settings_raw.get("proxy_port", DEFAULT_SETTINGS["proxy_port"]))),
+        proxy_ports=proxy_ports,
     )
 
     return RuntimeConfig(repositories=repositories, settings=settings)

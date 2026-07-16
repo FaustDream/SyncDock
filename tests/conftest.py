@@ -14,7 +14,7 @@ def settings():
         skip_uncommitted_changes=True,
         skip_untracked_files=False,
         log_retention_days=30,
-        proxy_port=28203,
+        proxy_ports=[28203],
     )
 
 

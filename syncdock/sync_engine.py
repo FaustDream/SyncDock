@@ -3,9 +3,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
+import logging
 import subprocess
 
 from syncdock.config_service import RepositoryConfig, SettingsConfig
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -21,10 +24,52 @@ HARD_MAX_GIT_PROCESSES = 6
 
 
 class GitCommandRunner:
-    def run(self, cwd: str, args: list[str], timeout_seconds: int, proxy_port: int | None = None) -> tuple[bool, str]:
+    def run(self, cwd: str, args: list[str], timeout_seconds: int, proxy_ports: list[int] | None = None) -> tuple[bool, str]:
+        """执行 Git 命令，支持多代理端口自动切换。
+
+        当 ``proxy_ports`` 提供时，按顺序尝试每个端口；若某个端口执行失败
+        （连接/网络相关错误），则自动切换到下一个端口重试。全部失败时返回错误。
+        """
+        if not proxy_ports:
+            return self._execute(cwd, self._build_command(args, None), timeout_seconds)
+
+        last_result: tuple[bool, str] | None = None
+        for i, port in enumerate(proxy_ports):
+            if i > 0:
+                logger.info("代理端口 %d 失败，尝试下一个端口 %d", proxy_ports[i - 1], port)
+            ok, message = self._execute(cwd, self._build_command(args, port), timeout_seconds)
+            if ok:
+                if i > 0:
+                    logger.info("代理端口 %d 连接成功", port)
+                return ok, message
+            # 只有网络/连接类错误才尝试下一个端口，其他错误直接返回
+            msg_lower = message.lower()
+            if not self._is_connection_error(msg_lower):
+                return ok, message
+            last_result = (ok, message)
+
+        return last_result or (False, "所有代理端口均连接失败")
+
+    @staticmethod
+    def _is_connection_error(message: str) -> bool:
+        """判断是否为网络连接类错误（此类错误值得尝试下一个端口）。"""
+        connection_keywords = [
+            "failed to connect",
+            "could not resolve host",
+            "connection refused",
+            "connection timed out",
+            "network is unreachable",
+            "no route to host",
+            "proxy connect",
+            "tunnel connection failed",
+            "could not resolve proxy",
+        ]
+        return any(kw in message for kw in connection_keywords)
+
+    def _execute(self, cwd: str, command: list[str], timeout_seconds: int) -> tuple[bool, str]:
         try:
             completed = subprocess.run(
-                self._build_command(args, proxy_port),
+                command,
                 cwd=cwd,
                 check=True,
                 stdout=subprocess.PIPE,
@@ -103,7 +148,7 @@ def sync_single_repository(repository: RepositoryConfig, settings: SettingsConfi
         repository.path,
         ["fetch", "--all", "--prune"],
         settings.command_timeout_seconds,
-        settings.proxy_port,
+        settings.proxy_ports,
     )
     if not fetch_ok:
         return SyncResult(repository.name, "FAILED", fetch_message)
@@ -124,7 +169,7 @@ def sync_single_repository(repository: RepositoryConfig, settings: SettingsConfi
         repository.path,
         ["pull", "--ff-only"],
         settings.command_timeout_seconds,
-        settings.proxy_port,
+        settings.proxy_ports,
     )
     if not pull_ok:
         return SyncResult(repository.name, "FAILED", pull_message)
@@ -152,7 +197,7 @@ def force_sync_single_repository(repository: RepositoryConfig, settings: Setting
         repository.path,
         ["fetch", "--all", "--prune"],
         settings.command_timeout_seconds,
-        settings.proxy_port,
+        settings.proxy_ports,
     )
     if not fetch_ok:
         return SyncResult(repository.name, "FAILED", fetch_message)
@@ -161,7 +206,7 @@ def force_sync_single_repository(repository: RepositoryConfig, settings: Setting
         repository.path,
         ["reset", "--hard", "@{upstream}"],
         settings.command_timeout_seconds,
-        settings.proxy_port,
+        settings.proxy_ports,
     )
     if not reset_ok:
         return SyncResult(repository.name, "FAILED", reset_message)
@@ -170,7 +215,7 @@ def force_sync_single_repository(repository: RepositoryConfig, settings: Setting
         repository.path,
         ["clean", "-fd"],
         settings.command_timeout_seconds,
-        settings.proxy_port,
+        settings.proxy_ports,
     )
     if not clean_ok:
         return SyncResult(repository.name, "FAILED", clean_message)
